@@ -108,10 +108,11 @@ class PRBotTelegram:
             elif data == 'trial':
                 await self.handle_trial(query)
             elif data == 'purchase':
-                await self.show_purchase_options(query)
-            elif data.startswith('buy_'):
-                plan = data.split('_')[1]
-                await self.handle_purchase(query, plan)
+                await self.show_payment_options(query)
+            elif data.startswith('pay_'):
+                await self.handle_payment_selection(query)
+            elif data == 'check_payment':
+                await self.check_payment_status(query)
             elif data == 'back_main':
                 await self.show_main_menu(query)
             elif data.startswith('admin_'):
@@ -358,17 +359,18 @@ class PRBotTelegram:
         )
 
     async def handle_trial(self, query):
-        """Handle free trial token generation with instructions"""
+        """Handle free trial token generation"""
         user_id = str(query.from_user.id)
         
+        # Check if user already had a trial
         if user_id in self.user_trials:
             last_trial = self.user_trials[user_id]
-            if time.time() - last_trial['timestamp'] < 86400:  # 24 hours
-                hours_left = 24 - (time.time() - last_trial['timestamp']) / 3600
+            if time.time() - last_trial['timestamp'] < 86400 * 30:  # 30 days cooldown
+                days_left = 30 - (time.time() - last_trial['timestamp']) / 86400
                 await query.edit_message_text(
                     f"{self.header}"
-                    "⚠️ *Trial Limit Reached*\n\n"
-                    f"Please wait {int(hours_left)} hours for a new trial.\n"
+                    "⚠️ *Trial Not Available*\n\n"
+                    f"Please wait {int(days_left)} days for a new trial.\n"
                     "Or purchase a token below:",
                     reply_markup=InlineKeyboardMarkup([
                         [InlineKeyboardButton("💰 Purchase Token", callback_data='purchase')],
@@ -380,461 +382,218 @@ class PRBotTelegram:
 
         # Generate trial token
         trial_token = self.generate_token(86400, 3)  # 24 hours, 3 uses
-        self.user_trials[user_id] = {
-            'timestamp': time.time(),
-            'token': trial_token,
-            'uses_remaining': 3
+        self.tokens['active'][trial_token] = {
+            'type': 'trial',
+            'created_at': time.time(),
+            'duration': 86400,
+            'uses_remaining': 3,
+            'redeemed': False
         }
         
-        # Save user data
-        if user_id not in self.users:
-            self.users[user_id] = {'balance': 0, 'tokens': []}
-        self.users[user_id]['tokens'].append(trial_token)
         self.save_data()
         
-        instructions = (
+        await query.edit_message_text(
             f"{self.header}"
             "🎁 *Your Trial Token is Ready!*\n\n"
             "*Your Token:*\n"
             f"`{trial_token}`\n\n"
             "*How to Use:*\n"
-            "1️⃣ Send your text to this bot\n"
-            "2️⃣ Wait for processing\n"
-            "3️⃣ Receive your spun text\n\n"
+            "1. Copy the token above\n"
+            "2. Send it as a message to activate\n"
+            "3. Start using the service\n\n"
             "*Token Details:*\n"
             "• Valid for 24 hours\n"
             "• 3 uses included\n"
-            "• Full access to all features\n\n"
+            "• One trial per account",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("📖 How to Use", callback_data='show_instructions')],
+                [InlineKeyboardButton("💰 Buy Full Access", callback_data='purchase')],
+                [InlineKeyboardButton("🔙 Back", callback_data='back_main')]
+            ]),
+            parse_mode='Markdown'
+        )
+
+    async def show_instructions(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Show clear usage instructions"""
+        instructions = (
+            f"{self.header}"
+            "*📖 How to Use TYP4SON Bot*\n\n"
+            "*1️⃣ Get Started:*\n"
+            "• Use /start to begin\n"
+            "• Get trial or buy token\n\n"
+            "*2️⃣ Redeem Token:*\n"
+            "• Simply send your token to the bot\n"
+            "• Example: `ABC123XYZ`\n"
+            "• Wait for confirmation\n\n"
+            "*3️⃣ Use Service:*\n"
+            "• Send your PR text\n"
+            "• Bot will process it\n"
+            "• Get unique version\n\n"
+            "*4️⃣ Important Notes:*\n"
+            "• One trial per account\n"
+            "• Tokens are single-use\n"
+            "• Check /status anytime\n\n"
             "*Need Help?*\n"
-            "• Use /help for instructions\n"
-            "• Use /status to check token\n"
-            "• Contact support if needed"
+            "Contact support: @typ4son_support"
         )
         
         keyboard = [
-            [InlineKeyboardButton("✍️ Start Spinning", callback_data='start_spinning')],
-            [InlineKeyboardButton("📖 How to Use", callback_data='show_instructions')],
-            [InlineKeyboardButton("💰 Buy Full Access", callback_data='purchase')],
-            [InlineKeyboardButton("🔙 Back", callback_data='back_main')]
+            [
+                InlineKeyboardButton("🎁 Get Trial", callback_data='trial'),
+                InlineKeyboardButton("💰 Buy Token", callback_data='purchase')
+            ],
+            [InlineKeyboardButton("📊 Check Status", callback_data='check_status')],
+            [InlineKeyboardButton("🔙 Main Menu", callback_data='back_main')]
         ]
         
-        await query.edit_message_text(
-            instructions,
-            reply_markup=InlineKeyboardMarkup(keyboard),
-            parse_mode='Markdown'
-        )
-
-    async def start_spinning(self, query):
-        """Start text spinning process"""
-        await query.edit_message_text(
-            f"{self.header}"
-            "*✍️ Text Spinning*\n\n"
-            "Simply send your text to spin.\n\n"
-            "*Guidelines:*\n"
-            "• Send text in a single message\n"
-            "• Wait for processing\n"
-            "• Receive spun version\n\n"
-            "_Send your text now..._",
-            reply_markup=InlineKeyboardMarkup([[
-                InlineKeyboardButton("🔙 Back", callback_data='back_main')
-            ]]),
-            parse_mode='Markdown'
-        )
-
-    async def handle_text(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Enhanced text handling with formatting options"""
-        message = update.message
-        user_id = str(message.from_user.id)
-        text = message.text.strip()
-
-        # Validate token
-        valid_token = await self.validate_user_token(user_id)
-        if not valid_token:
-            await message.reply_text(
-                f"{self.header}"
-                "❌ *No Valid Token Found*\n\n"
-                "Please get a trial token or purchase access:",
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("🎁 Free Trial", callback_data='trial')],
-                    [InlineKeyboardButton("💰 Buy Token", callback_data='purchase')]
-                ]),
+        if isinstance(update, Update):
+            await update.message.reply_text(
+                instructions,
+                reply_markup=InlineKeyboardMarkup(keyboard),
                 parse_mode='Markdown'
             )
-            return
-
-        # Process text
-        try:
-            processing_msg = await message.reply_text(
-                f"{self.header}"
-                "*🔄 Processing Text*\n\n"
-                "Please wait...",
-                parse_mode='Markdown'
-            )
-
-            # Get user preferences
-            user_prefs = self.get_user_preferences(user_id)
-            
-            results = await self.process_text(
-                text,
-                style=user_prefs.get('style', 'basic'),
-                variations=user_prefs.get('variations', 1),
-                format=user_prefs.get('format', 'markdown')
-            )
-            
-            # Update token usage
-            await self.update_token_usage(valid_token, user_id)
-            
-            # Get remaining uses
-            remaining_uses = self.tokens['active'][valid_token]['uses_remaining']
-
-            # Send results
-            if len(results) == 1:
-                # Single result
-                await processing_msg.edit_text(
-                    f"{self.header}"
-                    "*✅ Text Processed*\n\n"
-                    "*Original:*\n"
-                    f"`{text[:100]}...`\n\n"
-                    "*Spun Version:*\n"
-                    f"`{results[0][:100]}...`\n\n"
-                    f"*Uses Remaining: {remaining_uses}*",
-                    reply_markup=InlineKeyboardMarkup([
-                        [
-                            InlineKeyboardButton("🔄 New Spin", callback_data='spin_again'),
-                            InlineKeyboardButton("⚙️ Settings", callback_data='spin_settings')
-                        ],
-                        [InlineKeyboardButton("🔙 Back", callback_data='back_main')]
-                    ]),
-                    parse_mode='Markdown'
-                )
-                
-                # Send full text separately
-                await message.reply_text(
-                    "*Complete Spun Text:*\n\n"
-                    f"{results[0]}",
-                    parse_mode='Markdown'
-                )
-            else:
-                # Multiple variations
-                for i, result in enumerate(results, 1):
-                    await message.reply_text(
-                        f"*Version {i}:*\n\n{result}",
-                        parse_mode='Markdown'
-                    )
-
-        except Exception as e:
-            self.logger.error(f"Processing error: {str(e)}")
-            await processing_msg.edit_text(
-                f"{self.header}"
-                "❌ *Error Processing Text*\n\n"
-                f"Error: {str(e)}\n"
-                "Please try again or contact support.",
-                reply_markup=InlineKeyboardMarkup([[
-                    InlineKeyboardButton("🔄 Try Again", callback_data='spin_again')
-                ]]),
-                parse_mode='Markdown'
-            )
-
-    async def process_text(self, text: str, style: str = 'basic', variations: int = 1, format: str = 'markdown'):
-        """Enhanced text processing with multiple algorithms"""
-        results = []
-        
-        for _ in range(variations):
-            if style == 'basic':
-                # Basic word replacement
-                spun = await self.basic_spin(text)
-            elif style == 'advanced':
-                # Advanced sentence restructuring
-                spun = await self.advanced_spin(text)
-            elif style == 'creative':
-                # Creative rewriting
-                spun = await self.creative_spin(text)
-            elif style == 'professional':
-                # Professional tone
-                spun = await self.professional_spin(text)
-            else:
-                spun = text
-                
-            # Apply formatting
-            formatted = self.apply_format(spun, format)
-            results.append(formatted)
-            
-        return results
-
-    async def basic_spin(self, text: str) -> str:
-        """Basic word replacement algorithm"""
-        # Implement your basic spinning logic here
-        words = text.split()
-        spun_words = []
-        
-        for word in words:
-            if word.lower() in self.synonyms:
-                spun_words.append(random.choice(self.synonyms[word.lower()]))
-            else:
-                spun_words.append(word)
-                
-        return ' '.join(spun_words)
-
-    async def advanced_spin(self, text: str) -> str:
-        """Advanced sentence restructuring"""
-        sentences = text.split('. ')
-        spun_sentences = []
-        
-        for sentence in sentences:
-            # Sentence structure variations
-            words = sentence.split()
-            if len(words) > 3:
-                # Apply different sentence patterns
-                pattern = random.choice(['normal', 'passive', 'question'])
-                if pattern == 'passive':
-                    # Convert to passive voice
-                    spun_sentence = self.to_passive(words)
-                elif pattern == 'question':
-                    # Convert to question form
-                    spun_sentence = self.to_question(words)
-                else:
-                    # Normal with synonyms
-                    spun_sentence = await self.basic_spin(sentence)
-            else:
-                spun_sentence = sentence
-                
-            spun_sentences.append(spun_sentence)
-            
-        return '. '.join(spun_sentences)
-
-    async def creative_spin(self, text: str) -> str:
-        """Creative rewriting with style variations"""
-        paragraphs = text.split('\n\n')
-        spun_paragraphs = []
-        
-        for para in paragraphs:
-            # Add transitional phrases
-            transitions = [
-                "Interestingly,", "Moreover,", "In addition,",
-                "Furthermore,", "Notably,", "Specifically,"
-            ]
-            
-            if random.random() > 0.7:  # 30% chance to add transition
-                para = f"{random.choice(transitions)} {para}"
-                
-            # Apply advanced spinning
-            spun_para = await self.advanced_spin(para)
-            spun_paragraphs.append(spun_para)
-            
-        return '\n\n'.join(spun_paragraphs)
-
-    async def professional_spin(self, text: str) -> str:
-        """Professional tone rewriting"""
-        # Replace casual words with professional alternatives
-        professional_replacements = {
-            'good': ['excellent', 'exceptional', 'outstanding'],
-            'bad': ['unfavorable', 'suboptimal', 'inadequate'],
-            'big': ['substantial', 'significant', 'considerable'],
-            # Add more professional word replacements
-        }
-        
-        words = text.split()
-        professional_words = []
-        
-        for word in words:
-            lower_word = word.lower()
-            if lower_word in professional_replacements:
-                replacement = random.choice(professional_replacements[lower_word])
-                professional_words.append(replacement)
-            else:
-                professional_words.append(word)
-                
-        return ' '.join(professional_words)
-
-    def apply_format(self, text: str, format: str) -> str:
-        """Apply formatting to text"""
-        if format == 'markdown':
-            # Add markdown formatting
-            paragraphs = text.split('\n\n')
-            formatted = []
-            
-            for i, para in enumerate(paragraphs):
-                if i == 0:
-                    # First paragraph in bold
-                    formatted.append(f"*{para}*")
-                else:
-                    # Add bullet points to other paragraphs
-                    formatted.append(f"• {para}")
-                    
-            return '\n\n'.join(formatted)
-            
-        elif format == 'html':
-            # Clean and format text for Telegram HTML
-            clean_text = text.replace('<', '&lt;').replace('>', '&gt;')
-            paragraphs = clean_text.split('\n\n')
-            formatted = []
-            
-            for i, para in enumerate(paragraphs):
-                if i == 0:
-                    # First paragraph bold
-                    formatted.append(f"<b>{para}</b>")
-                else:
-                    # Regular paragraphs
-                    formatted.append(para)
-                    
-            return '\n\n'.join(formatted)
-            
-        elif format == 'clean':
-            # Remove all formatting and special characters
-            clean_text = text
-            # Remove markdown
-            clean_text = clean_text.replace('*', '').replace('_', '').replace('`', '')
-            # Remove HTML
-            clean_text = clean_text.replace('<', '').replace('>', '')
-            # Remove extra spaces
-            clean_text = ' '.join(clean_text.split())
-            return clean_text
-            
-        elif format == 'simple':
-            # Basic text with minimal formatting
-            paragraphs = text.split('\n\n')
-            return '\n\n'.join(f"- {p.strip()}" for p in paragraphs)
-            
-        # Default: return original text
-        return text
-
-    async def handle_batch_process(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Enhanced batch processing with progress updates"""
-        message = update.message
-        user_id = str(message.from_user.id)
-        
-        if not message.document:
-            await message.reply_text(
-                f"{self.header}"
-                "*📦 Batch Processing*\n\n"
-                "*Supported Formats:*\n"
-                "• Text file (.txt)\n"
-                "• One text per line\n"
-                "• Max 100 texts per batch\n\n"
-                "*How to Use:*\n"
-                "1. Prepare your text file\n"
-                "2. Upload to this chat\n"
-                "3. Select processing options\n"
-                "4. Wait for results",
-                parse_mode='Markdown'
-            )
-            return
-
-        try:
-            # Download and process file
-            file = await context.bot.get_file(message.document.file_id)
-            file_content = await file.download_as_bytearray()
-            texts = file_content.decode('utf-8').split('\n\n')
-            
-            if len(texts) > 100:
-                await message.reply_text(
-                    f"{self.header}"
-                    "❌ *Batch Too Large*\n\n"
-                    "Maximum 100 texts per batch allowed.",
-                    parse_mode='Markdown'
-                )
-                return
-
-            # Show processing options
-            keyboard = [
-                [
-                    InlineKeyboardButton("Basic", callback_data=f'batch_basic_{message.document.file_id}'),
-                    InlineKeyboardButton("Advanced", callback_data=f'batch_advanced_{message.document.file_id}')
-                ],
-                [
-                    InlineKeyboardButton("Creative", callback_data=f'batch_creative_{message.document.file_id}'),
-                    InlineKeyboardButton("Professional", callback_data=f'batch_professional_{message.document.file_id}')
-                ],
-                [InlineKeyboardButton("❌ Cancel", callback_data='cancel_batch')]
-            ]
-            
-            await message.reply_text(
-                f"{self.header}"
-                "*📦 Select Processing Style*\n\n"
-                f"• Texts to process: {len(texts)}\n"
-                "• Estimated time: ~{len(texts) * 2} seconds\n\n"
-                "Choose spinning style:",
+        else:
+            await update.edit_message_text(
+                instructions,
                 reply_markup=InlineKeyboardMarkup(keyboard),
                 parse_mode='Markdown'
             )
 
-        except Exception as e:
-            self.logger.error(f"Batch processing error: {str(e)}")
+    async def handle_text(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle text messages - either token redemption or PR processing"""
+        message = update.message
+        user_id = str(message.from_user.id)
+        text = message.text.strip()
+
+        # Check if text looks like a token (e.g., alphanumeric, specific length)
+        if len(text) == 10 and text.isalnum():  # Adjust token format as needed
+            await self.handle_token_redemption(message, text)
+        else:
+            await self.process_pr_text_message(message, text)
+
+    async def handle_token_redemption(self, message, token: str):
+        """Handle token redemption process"""
+        user_id = str(message.from_user.id)
+
+        # Check if token exists and is not used
+        if token in self.tokens.get('active', {}):
+            token_data = self.tokens['active'][token]
+            
+            # Check if token is already redeemed
+            if token_data.get('redeemed'):
+                await message.reply_text(
+                    f"{self.header}"
+                    "❌ *Token Already Used*\n\n"
+                    "This token has already been redeemed.\n"
+                    "Please get a new token:",
+                    reply_markup=InlineKeyboardMarkup([
+                        [InlineKeyboardButton("💰 Buy Token", callback_data='purchase')]
+                    ]),
+                    parse_mode='Markdown'
+                )
+                return
+
+            # Check if user already has a trial (for trial tokens)
+            if token_data.get('type') == 'trial':
+                if user_id in self.user_trials:
+                    await message.reply_text(
+                        f"{self.header}"
+                        "❌ *Trial Limit Reached*\n\n"
+                        "You have already used your trial.\n"
+                        "Please purchase a token to continue:",
+                        reply_markup=InlineKeyboardMarkup([
+                            [InlineKeyboardButton("💰 Buy Token", callback_data='purchase')]
+                        ]),
+                        parse_mode='Markdown'
+                    )
+                    return
+                self.user_trials[user_id] = {
+                    'timestamp': time.time(),
+                    'token': token,
+                    'uses_remaining': 3
+                }
+
+            # Add token to user and mark as redeemed
+            if user_id not in self.users:
+                self.users[user_id] = {'tokens': [], 'balance': 0}
+            
+            self.users[user_id]['tokens'].append(token)
+            token_data['redeemed'] = True
+            token_data['redeemed_by'] = user_id
+            token_data['redeemed_at'] = time.time()
+            
+            self.save_data()
+            
+            # Send confirmation
+            expiry_date = datetime.fromtimestamp(
+                token_data['created_at'] + token_data['duration']
+            ).strftime('%Y-%m-%d %H:%M')
+            
             await message.reply_text(
                 f"{self.header}"
-                "❌ *Error Processing Batch*\n\n"
-                "Please check your file and try again.",
+                "✅ *Token Activated Successfully!*\n\n"
+                "*Token Details:*\n"
+                f"• Type: {token_data.get('type', 'Standard').title()}\n"
+                f"• Uses: {token_data['uses_remaining']}\n"
+                f"• Expires: {expiry_date}\n\n"
+                "*Ready to Use:*\n"
+                "• Send your PR text\n"
+                "• Get unique version\n"
+                "• Monitor with /status",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("📝 Start Using", callback_data='start_processing')],
+                    [InlineKeyboardButton("📊 Check Status", callback_data='check_status')]
+                ]),
+                parse_mode='Markdown'
+            )
+        else:
+            await message.reply_text(
+                f"{self.header}"
+                "❌ *Invalid Token*\n\n"
+                "This token is invalid or expired.\n"
+                "Please check and try again or get a new token:",
+                reply_markup=InlineKeyboardMarkup([
+                    [
+                        InlineKeyboardButton("🎁 Free Trial", callback_data='trial'),
+                        InlineKeyboardButton("💰 Buy Token", callback_data='purchase')
+                    ]
+                ]),
                 parse_mode='Markdown'
             )
 
-    async def show_instructions(self, query):
-        """Show detailed usage instructions"""
-        instructions = (
+    async def show_payment_options(self, query):
+        """Show available payment options"""
+        message = (
             f"{self.header}"
-            "*📖 How to Use TYP4SON Bot*\n\n"
-            "*Step-by-Step Guide:*\n\n"
-            "1️⃣ *Get Your Token*\n"
-            "• Use trial or purchase token\n"
-            "• Keep token secure\n\n"
-            "2️⃣ *Send Text*\n"
-            "• Send text to this bot\n"
-            "• One message at a time\n\n"
-            "3️⃣ *Receive Results*\n"
-            "• Wait for processing\n"
-            "• Get spun version\n\n"
-            "4️⃣ *Monitor Usage*\n"
-            "• Check remaining uses\n"
-            "• Purchase more if needed\n\n"
-            "*Commands:*\n"
-            "• /start - Main menu\n"
-            "• /help - Show this guide\n"
-            "• /status - Check token status"
+            "*💰 Purchase Tokens*\n\n"
+            "*Available Plans:*\n\n"
+            "1️⃣ *Starter Pack*\n"
+            "• 50 uses\n"
+            "• 30 days validity\n"
+            "• $10\n\n"
+            "2️⃣ *Pro Pack*\n"
+            "• 200 uses\n"
+            "• 60 days validity\n"
+            "• $30\n\n"
+            "3️⃣ *Premium Pack*\n"
+            "• 500 uses\n"
+            "• 90 days validity\n"
+            "• $60\n\n"
+            "*Select a plan to continue:*"
         )
         
         keyboard = [
-            [InlineKeyboardButton("✍️ Start Spinning", callback_data='start_spinning')],
+            [
+                InlineKeyboardButton("Starter $10", callback_data='pay_starter'),
+                InlineKeyboardButton("Pro $30", callback_data='pay_pro')
+            ],
+            [
+                InlineKeyboardButton("Premium $60", callback_data='pay_premium'),
+                InlineKeyboardButton("Custom", callback_data='pay_custom')
+            ],
+            [InlineKeyboardButton("💳 Payment Methods", callback_data='payment_methods')],
             [InlineKeyboardButton("🔙 Back", callback_data='back_main')]
         ]
-        
-        await query.edit_message_text(
-            instructions,
-            reply_markup=InlineKeyboardMarkup(keyboard),
-            parse_mode='Markdown'
-        )
-
-    async def show_purchase_options(self, query):
-        """Show available purchase plans"""
-        plans = {
-            'daily': {'price': 5, 'uses': 10, 'duration': '1 Day'},
-            'weekly': {'price': 25, 'uses': 100, 'duration': '1 Week'},
-            'monthly': {'price': 80, 'uses': 500, 'duration': '1 Month'}
-        }
-        
-        message = (
-            f"{self.header}"
-            "*💰 Available Plans*\n\n"
-        )
-        
-        keyboard = []
-        
-        for plan_id, details in plans.items():
-            message += (
-                f"*{details['duration']}*\n"
-                f"• Price: ${details['price']}\n"
-                f"• Uses: {details['uses']}\n"
-                "━━━━━━━━━━\n"
-            )
-            keyboard.append([
-                InlineKeyboardButton(
-                    f"Buy {details['duration']} (${details['price']})",
-                    callback_data=f'buy_{plan_id}'
-                )
-            ])
-        
-        keyboard.extend([
-            [InlineKeyboardButton("💳 Payment Methods", callback_data='show_payment_methods')],
-            [InlineKeyboardButton("🔙 Back", callback_data='back_main')]
-        ])
         
         await query.edit_message_text(
             message,
@@ -842,69 +601,172 @@ class PRBotTelegram:
             parse_mode='Markdown'
         )
 
-    async def handle_purchase(self, query, plan):
-        """Handle token purchase"""
-        user_id = str(query.from_user.id)
+    async def handle_payment_selection(self, query):
+        """Handle payment plan selection"""
+        plan = query.data.split('_')[1]
+        
         plans = {
-            'daily': {'price': 5, 'uses': 10, 'duration': 86400},
-            'weekly': {'price': 25, 'uses': 100, 'duration': 604800},
-            'monthly': {'price': 80, 'uses': 500, 'duration': 2592000}
+            'starter': {'price': 10, 'uses': 50, 'days': 30},
+            'pro': {'price': 30, 'uses': 200, 'days': 60},
+            'premium': {'price': 60, 'uses': 500, 'days': 90},
+            'custom': {'price': 0, 'uses': 0, 'days': 0}  # Handled separately
         }
         
         if plan not in plans:
             await query.edit_message_text(
                 f"{self.header}"
-                "❌ Invalid plan selected.",
+                "❌ *Invalid Selection*\n\n"
+                "Please try again.",
                 reply_markup=InlineKeyboardMarkup([[
-                    InlineKeyboardButton("🔙 Back", callback_data='purchase')
-                ]])
-            )
-            return
-        
-        plan_details = plans[plan]
-        user_balance = self.users.get(user_id, {}).get('balance', 0)
-        
-        if user_balance < plan_details['price']:
-            await query.edit_message_text(
-                f"{self.header}"
-                "❌ *Insufficient Balance*\n\n"
-                f"Required: ${plan_details['price']}\n"
-                f"Your Balance: ${user_balance}\n\n"
-                "Please add funds to continue:",
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("💳 Add Funds", callback_data='add_funds')],
-                    [InlineKeyboardButton("🔙 Back", callback_data='purchase')]
-                ]),
+                    InlineKeyboardButton("🔙 Back to Plans", callback_data='purchase')
+                ]]),
                 parse_mode='Markdown'
             )
             return
+            
+        if plan == 'custom':
+            await self.show_custom_plan(query)
+            return
+            
+        selected_plan = plans[plan]
         
-        # Generate token
-        token = self.generate_token(
-            plan_details['duration'],
-            plan_details['uses']
+        message = (
+            f"{self.header}"
+            "*🛒 Payment Details*\n\n"
+            f"*Selected Plan:* {plan.title()}\n"
+            f"*Price:* ${selected_plan['price']}\n"
+            f"*Uses:* {selected_plan['uses']}\n"
+            f"*Validity:* {selected_plan['days']} days\n\n"
+            "*Payment Methods:*\n"
+            "• Crypto (BTC/ETH/USDT)\n"
+            "• Credit Card\n"
+            "• Bank Transfer\n\n"
+            "*Select payment method to continue:*"
         )
         
-        # Update user data
-        if user_id not in self.users:
-            self.users[user_id] = {'balance': 0, 'tokens': []}
-        self.users[user_id]['balance'] -= plan_details['price']
-        self.users[user_id]['tokens'].append(token)
-        self.save_data()
+        keyboard = [
+            [
+                InlineKeyboardButton("💎 Crypto", callback_data=f'crypto_{plan}'),
+                InlineKeyboardButton("💳 Card", callback_data=f'card_{plan}')
+            ],
+            [
+                InlineKeyboardButton("🏦 Bank", callback_data=f'bank_{plan}'),
+                InlineKeyboardButton("❓ Help", callback_data='payment_help')
+            ],
+            [InlineKeyboardButton("🔙 Back to Plans", callback_data='purchase')]
+        ]
         
         await query.edit_message_text(
-            f"{self.header}"
-            "✅ *Purchase Successful!*\n\n"
-            f"Your new token:\n`{token}`\n\n"
-            f"Duration: {plan_details['duration'] // 86400} days\n"
-            f"Uses: {plan_details['uses']}\n"
-            f"Remaining Balance: ${self.users[user_id]['balance']:.2f}",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🔙 Back to Shop", callback_data='purchase')],
-                [InlineKeyboardButton("🏠 Main Menu", callback_data='back_main')]
-            ]),
+            message,
+            reply_markup=InlineKeyboardMarkup(keyboard),
             parse_mode='Markdown'
         )
+
+    async def show_custom_plan(self, query):
+        """Show custom plan options"""
+        message = (
+            f"{self.header}"
+            "*🎯 Custom Plan*\n\n"
+            "*Choose Your Package:*\n\n"
+            "• Uses: 100-1000\n"
+            "• Validity: 30-180 days\n"
+            "• Custom features\n\n"
+            "*Contact us to create your plan:*\n"
+            "• @typ4son_support\n\n"
+            "*Include in your message:*\n"
+            "• Desired uses\n"
+            "• Validity period\n"
+            "• Special requirements"
+        )
+        
+        keyboard = [
+            [InlineKeyboardButton("💬 Contact Support", url='https://t.me/typ4son_support')],
+            [InlineKeyboardButton("🔙 Back to Plans", callback_data='purchase')]
+        ]
+        
+        await query.edit_message_text(
+            message,
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode='Markdown'
+        )
+
+    async def show_payment_methods(self, query):
+        """Show available payment methods details"""
+        message = (
+            f"{self.header}"
+            "*💳 Payment Methods*\n\n"
+            "*1. Cryptocurrency*\n"
+            "• BTC\n"
+            "• ETH\n"
+            "• USDT (TRC20)\n\n"
+            "*2. Credit Card*\n"
+            "• Visa\n"
+            "• Mastercard\n"
+            "• American Express\n\n"
+            "*3. Bank Transfer*\n"
+            "• International\n"
+            "• SWIFT\n"
+            "• Wire Transfer\n\n"
+            "*Select method for instructions*"
+        )
+        
+        keyboard = [
+            [
+                InlineKeyboardButton("🪙 Crypto", callback_data='method_crypto'),
+                InlineKeyboardButton("💳 Card", callback_data='method_card')
+            ],
+            [
+                InlineKeyboardButton("🏦 Bank", callback_data='method_bank'),
+                InlineKeyboardButton("❓ Help", callback_data='payment_help')
+            ],
+            [InlineKeyboardButton("🔙 Back", callback_data='purchase')]
+        ]
+        
+        await query.edit_message_text(
+            message,
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode='Markdown'
+        )
+
+    async def check_payment_status(self, query):
+        """Check payment status"""
+        user_id = str(query.from_user.id)
+        
+        if user_id in self.payments.get('pending', []):
+            await query.edit_message_text(
+                f"{self.header}"
+                "*💰 Payment Status: Pending*\n\n"
+                "Your payment is being processed.\n"
+                "Please wait for confirmation.\n\n"
+                "This usually takes 5-15 minutes.",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("🔄 Check Again", callback_data='check_payment')],
+                    [InlineKeyboardButton("❓ Need Help", callback_data='payment_help')]
+                ]),
+                parse_mode='Markdown'
+            )
+        elif user_id in self.payments.get('completed', []):
+            await query.edit_message_text(
+                f"{self.header}"
+                "✅ *Payment Completed*\n\n"
+                "Your token has been activated.\n"
+                "Check your status with /status",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("📊 Check Status", callback_data='check_status')]
+                ]),
+                parse_mode='Markdown'
+            )
+        else:
+            await query.edit_message_text(
+                f"{self.header}"
+                "❌ *No Pending Payments*\n\n"
+                "Would you like to purchase a token?",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("💰 Purchase", callback_data='purchase')],
+                    [InlineKeyboardButton("🔙 Back", callback_data='back_main')]
+                ]),
+                parse_mode='Markdown'
+            )
 
     async def show_tokens_list(self, query):
         """Show active tokens list"""
@@ -1187,457 +1049,6 @@ class PRBotTelegram:
             reply_markup=InlineKeyboardMarkup(keyboard),
             parse_mode='Markdown'
         )
-
-    async def redeem_token(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle token redemption"""
-        message = update.message
-        user_id = str(message.from_user.id)
-        token = message.text.replace("/redeem ", "").strip()
-
-        if token in self.tokens['active']:
-            token_data = self.tokens['active'][token]
-            
-            # Check if token is valid
-            if time.time() - token_data['created_at'] <= token_data['duration']:
-                if token_data['uses_remaining'] > 0:
-                    # Add token to user
-                    if user_id not in self.users:
-                        self.users[user_id] = {'balance': 0, 'tokens': []}
-                    
-                    if token not in self.users[user_id]['tokens']:
-                        self.users[user_id]['tokens'].append(token)
-                        self.save_data()
-                        
-                        await message.reply_text(
-                            f"{self.header}"
-                            "✅ *Token Redeemed Successfully*\n\n"
-                            f"Uses Remaining: {token_data['uses_remaining']}\n"
-                            "Expiry: " + datetime.fromtimestamp(
-                                token_data['created_at'] + token_data['duration']
-                            ).strftime('%Y-%m-%d %H:%M'),
-                            parse_mode='Markdown'
-                        )
-                    else:
-                        await message.reply_text(
-                            f"{self.header}"
-                            "⚠️ *Token Already Redeemed*\n\n"
-                            "This token is already linked to your account.",
-                            parse_mode='Markdown'
-                        )
-                else:
-                    await message.reply_text(
-                        f"{self.header}"
-                        "❌ *Token Depleted*\n\n"
-                        "This token has no uses remaining.",
-                        parse_mode='Markdown'
-                    )
-            else:
-                await message.reply_text(
-                    f"{self.header}"
-                    "❌ *Token Expired*\n\n"
-                    "This token has expired.",
-                    parse_mode='Markdown'
-                )
-        else:
-            await message.reply_text(
-                f"{self.header}"
-                "❌ *Invalid Token*\n\n"
-                "Please check your token and try again.",
-                parse_mode='Markdown'
-            )
-
-    async def show_help(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Show help and usage instructions"""
-        help_text = (
-            f"{self.header}"
-            "*📖 How to Use TYP4SON Bot*\n\n"
-            "*🎫 Token Management:*\n"
-            "• /start - Start the bot\n"
-            "• /redeem <token> - Redeem a token\n"
-            "• /balance - Check your balance\n"
-            "• /help - Show this help\n\n"
-            "*🔄 Using PR Service:*\n"
-            "1. Get a token (trial or purchase)\n"
-            "2. Copy your GitHub PR URL\n"
-            "3. Send the URL to this bot\n"
-            "4. Wait for processing\n\n"
-            "*💡 Tips:*\n"
-            "• Keep your tokens secure\n"
-            "• Check token expiry dates\n"
-            "• Monitor remaining uses\n"
-            "• Contact support if needed"
-        )
-        
-        keyboard = [
-            [
-                InlineKeyboardButton("🎁 Get Trial", callback_data='trial'),
-                InlineKeyboardButton("💰 Buy Token", callback_data='purchase')
-            ],
-            [InlineKeyboardButton("👤 Profile", callback_data='profile')]
-        ]
-        
-        await update.message.reply_text(
-            help_text,
-            reply_markup=InlineKeyboardMarkup(keyboard),
-            parse_mode='Markdown'
-        )
-
-    async def admin_token_history(self, query):
-        """View token usage history"""
-        history_text = (
-            f"{self.header}"
-            "*📜 Token Usage History*\n\n"
-        )
-        
-        recent_usage = sorted(
-            self.token_history.items(),
-            key=lambda x: x[1]['timestamp'],
-            reverse=True
-        )[:5]
-        
-        for token_id, data in recent_usage:
-            history_text += (
-                f"Token: `{token_id[:10]}...`\n"
-                f"Used: {datetime.fromtimestamp(data['timestamp']).strftime('%Y-%m-%d %H:%M')}\n"
-                f"User: `{data['user_id']}`\n"
-                f"Status: {'✅' if data['success'] else '❌'}\n"
-                "━━━━━━━━━━\n"
-            )
-        
-        keyboard = [
-            [
-                InlineKeyboardButton("📊 Analytics", callback_data='token_analytics'),
-                InlineKeyboardButton("🔍 Search", callback_data='token_search')
-            ],
-            [InlineKeyboardButton("🔙 Back", callback_data='admin_tokens')]
-        ]
-        
-        await query.edit_message_text(
-            history_text,
-            reply_markup=InlineKeyboardMarkup(keyboard),
-            parse_mode='Markdown'
-        )
-
-    def get_security_settings(self):
-        """Get current security settings"""
-        return {
-            'ip_logging': True,
-            'rate_limit': '10/minute',
-            'active_sessions': {},
-            'blocked_ips': set(),
-            '2fa_enabled': True,
-            'suspicious_activity_detection': True
-        }
-
-    async def process_pr_queue(self):
-        """Process PR queue"""
-        while True:
-            if self.pr_queue['pending']:
-                pr_data = self.pr_queue['pending'].pop(0)
-                self.pr_queue['active'].append(pr_data)
-                
-                try:
-                    # Process PR logic here
-                    success = True  # Replace with actual processing
-                    
-                    if success:
-                        self.pr_queue['completed'].append(pr_data)
-                    else:
-                        self.pr_queue['failed'].append(pr_data)
-                        
-                except Exception as e:
-                    self.logger.error(f"PR processing error: {str(e)}")
-                    self.pr_queue['failed'].append(pr_data)
-                
-                finally:
-                    self.pr_queue['active'].remove(pr_data)
-            
-            await asyncio.sleep(1)  # Prevent CPU overload
-
-    def initialize_data(self):
-        """Initialize bot data structures"""
-        self.token_history = {}
-        self.pr_queue = {
-            'pending': [],
-            'active': [],
-            'completed': [],
-            'failed': []
-        }
-        self.payments = {
-            'pending': [],
-            'completed': [],
-            'failed': []
-        }
-        self.active_sessions = {}
-        self.blocked_ips = set()
-
-    async def setup_payment_methods(self, query):
-        """Admin: Setup payment methods"""
-        keyboard = [
-            [
-                InlineKeyboardButton("💰 Crypto Settings", callback_data='admin_crypto_setup'),
-                InlineKeyboardButton("💳 Other Methods", callback_data='admin_other_payments')
-            ],
-            [
-                InlineKeyboardButton("📋 View Current", callback_data='admin_view_payments'),
-                InlineKeyboardButton("✏️ Edit", callback_data='admin_edit_payments')
-            ],
-            [InlineKeyboardButton("🔙 Back to Admin", callback_data='admin')]
-        ]
-        
-        await query.edit_message_text(
-            f"{self.header}"
-            "*💰 Payment Method Setup*\n\n"
-            "Configure payment methods and addresses.\n"
-            "Current methods:\n\n"
-            "• Crypto (BTC/ETH/USDT)\n"
-            "• Other payment methods\n\n"
-            "Select an option to configure:",
-            reply_markup=InlineKeyboardMarkup(keyboard),
-            parse_mode='Markdown'
-        )
-
-    async def setup_crypto_payments(self, query):
-        """Admin: Setup crypto payment addresses"""
-        current_addresses = self.get_payment_addresses()
-        
-        message = (
-            f"{self.header}"
-            "*🪙 Crypto Payment Setup*\n\n"
-            "*Current Addresses:*\n"
-            f"BTC: `{current_addresses.get('btc', 'Not set')}`\n"
-            f"ETH: `{current_addresses.get('eth', 'Not set')}`\n"
-            f"USDT: `{current_addresses.get('usdt', 'Not set')}`\n\n"
-            "Select cryptocurrency to edit:"
-        )
-        
-        keyboard = [
-            [
-                InlineKeyboardButton("Bitcoin (BTC)", callback_data='set_crypto_btc'),
-                InlineKeyboardButton("Ethereum (ETH)", callback_data='set_crypto_eth')
-            ],
-            [
-                InlineKeyboardButton("USDT (TRC20)", callback_data='set_crypto_usdt'),
-                InlineKeyboardButton("View QR", callback_data='view_crypto_qr')
-            ],
-            [InlineKeyboardButton("🔙 Back", callback_data='admin_payment_setup')]
-        ]
-        
-        await query.edit_message_text(
-            message,
-            reply_markup=InlineKeyboardMarkup(keyboard),
-            parse_mode='Markdown'
-        )
-
-    async def show_payment_methods(self, query):
-        """Show available payment methods"""
-        message = (
-            f"{self.header}"
-            "*💳 Payment Methods*\n\n"
-            "*Cryptocurrency:*\n"
-            "• Bitcoin (BTC)\n"
-            "• Ethereum (ETH)\n"
-            "• USDT (TRC20)\n\n"
-            "Select your preferred payment method:"
-        )
-        
-        keyboard = [
-            [
-                InlineKeyboardButton("Bitcoin (BTC)", callback_data='pay_crypto_btc'),
-                InlineKeyboardButton("Ethereum (ETH)", callback_data='pay_crypto_eth')
-            ],
-            [
-                InlineKeyboardButton("USDT (TRC20)", callback_data='pay_crypto_usdt')
-            ],
-            [InlineKeyboardButton("🔙 Back to Plans", callback_data='purchase')]
-        ]
-        
-        await query.edit_message_text(
-            message,
-            reply_markup=InlineKeyboardMarkup(keyboard),
-            parse_mode='Markdown'
-        )
-
-    async def process_crypto_payment(self, query, crypto):
-        """Process crypto payment"""
-        payment_addresses = self.get_payment_addresses()
-        address = payment_addresses.get(crypto.lower())
-        
-        if not address:
-            await query.edit_message_text(
-                f"{self.header}"
-                "❌ *Payment Method Unavailable*\n\n"
-                "Please choose a different payment method or try again later.",
-                reply_markup=InlineKeyboardMarkup([[
-                    InlineKeyboardButton("🔙 Back", callback_data='show_payment_methods')
-                ]]),
-                parse_mode='Markdown'
-            )
-            return
-        
-        message = (
-            f"{self.header}"
-            f"*{crypto.upper()} Payment*\n\n"
-            "*Send payment to:*\n"
-            f"`{address}`\n\n"
-            "*Instructions:*\n"
-            "1. Copy the address above\n"
-            "2. Send the exact amount\n"
-            "3. Click 'I've Paid' below\n"
-            "4. Wait for confirmation\n\n"
-            "_Payment will be verified automatically_"
-        )
-        
-        keyboard = [
-            [InlineKeyboardButton("✅ I've Paid", callback_data=f'verify_payment_{crypto.lower()}')],
-            [InlineKeyboardButton("🔙 Back", callback_data='show_payment_methods')]
-        ]
-        
-        await query.edit_message_text(
-            message,
-            reply_markup=InlineKeyboardMarkup(keyboard),
-            parse_mode='Markdown'
-        )
-
-    def get_payment_addresses(self):
-        """Get configured payment addresses"""
-        try:
-            with open('payment_config.json', 'r') as f:
-                return json.load(f)
-        except FileNotFoundError:
-            return {
-                'btc': '',
-                'eth': '',
-                'usdt': ''
-            }
-
-    async def handle_trial_usage(self, user_id: str, pr_url: str):
-        """Handle trial token usage"""
-        if user_id in self.user_trials:
-            trial_data = self.user_trials[user_id]
-            if trial_data['uses_remaining'] > 0:
-                # Process PR with trial token
-                success = await self.process_pr(pr_url)
-                if success:
-                    trial_data['uses_remaining'] -= 1
-                    self.save_data()
-                    return True, trial_data['uses_remaining']
-            return False, 0
-        return False, -1
-
-    async def show_spin_options(self, query):
-        """Show spinning options menu"""
-        keyboard = [
-            [
-                InlineKeyboardButton("🔄 Basic Spin", callback_data='spin_basic'),
-                InlineKeyboardButton("✨ Advanced Spin", callback_data='spin_advanced')
-            ],
-            [
-                InlineKeyboardButton("📝 Multiple Versions", callback_data='spin_multiple'),
-                InlineKeyboardButton("📦 Batch Process", callback_data='spin_batch')
-            ],
-            [
-                InlineKeyboardButton("⚙️ Settings", callback_data='spin_settings'),
-                InlineKeyboardButton("❓ Help", callback_data='spin_help')
-            ],
-            [InlineKeyboardButton("🔙 Back", callback_data='back_main')]
-        ]
-        
-        await query.edit_message_text(
-            f"{self.header}"
-            "*✍️ Text Spinning Options*\n\n"
-            "*Available Features:*\n\n"
-            "🔄 *Basic Spin*\n"
-            "• Simple text rewriting\n"
-            "• Quick processing\n\n"
-            "✨ *Advanced Spin*\n"
-            "• Deep rewriting\n"
-            "• Multiple synonyms\n\n"
-            "📝 *Multiple Versions*\n"
-            "• Get several variants\n"
-            "• Different styles\n\n"
-            "📦 *Batch Process*\n"
-            "• Multiple texts at once\n"
-            "• Bulk processing\n\n"
-            "_Select an option to continue_",
-            reply_markup=InlineKeyboardMarkup(keyboard),
-            parse_mode='Markdown'
-        )
-
-    async def handle_batch_upload(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle batch text processing"""
-        message = update.message
-        user_id = str(message.from_user.id)
-        
-        # Check if file is uploaded
-        if not message.document:
-            await message.reply_text(
-                f"{self.header}"
-                "❌ *Invalid Format*\n\n"
-                "Please upload a text file (.txt)",
-                parse_mode='Markdown'
-            )
-            return
-
-        # Validate token
-        valid_token = await self.validate_user_token(user_id)
-        if not valid_token:
-            await message.reply_text(
-                f"{self.header}"
-                "❌ *No Valid Token Found*\n\n"
-                "Please get a token first:",
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("🎁 Free Trial", callback_data='trial')],
-                    [InlineKeyboardButton("💰 Buy Token", callback_data='purchase')]
-                ]),
-                parse_mode='Markdown'
-            )
-            return
-
-        try:
-            # Download file
-            file = await context.bot.get_file(message.document.file_id)
-            file_content = await file.download_as_bytearray()
-            texts = file_content.decode('utf-8').split('\n\n')
-
-            # Process each text
-            processing_msg = await message.reply_text(
-                f"{self.header}"
-                "*🔄 Processing Batch*\n\n"
-                f"Total texts: {len(texts)}\n"
-                "Please wait...",
-                parse_mode='Markdown'
-            )
-
-            results = []
-            for text in texts:
-                if text.strip():
-                    spun = await self.spin_text(text)
-                    results.append(spun)
-
-            # Save results
-            output = '\n\n'.join(results)
-            with open(f'spun_batch_{user_id}.txt', 'w') as f:
-                f.write(output)
-
-            # Send results file
-            await message.reply_document(
-                document=open(f'spun_batch_{user_id}.txt', 'rb'),
-                caption=f"{self.header}✅ *Batch Processing Complete*\n\n"
-                        f"• Processed: {len(results)} texts\n"
-                        "• Format: TXT file\n\n"
-                        "_Download the file to see results_",
-                parse_mode='Markdown'
-            )
-
-        except Exception as e:
-            self.logger.error(f"Batch processing error: {str(e)}")
-            await processing_msg.edit_text(
-                f"{self.header}"
-                "❌ *Batch Processing Error*\n\n"
-                "Please try again or contact support.",
-                parse_mode='Markdown'
-            )
 
     async def show_token_status(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Show user's token status and details"""
