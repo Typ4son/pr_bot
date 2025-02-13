@@ -217,13 +217,18 @@ def main():
     application.add_handler(CommandHandler("generate_token", bot.generate_new_token))
     application.add_handler(CallbackQueryHandler(bot.button_handler))
 
-    # Start the bot with port configuration
+    # Start the bot
     print('Bot is starting...')
-    application.run_webhook(
-        listen="0.0.0.0",
-        port=PORT,
-        webhook_url=os.getenv('WEBHOOK_URL', f"https://your-app.onrender.com/")
-    )
+    if os.getenv('ENVIRONMENT') == 'production':
+        # Use webhook in production
+        application.run_webhook(
+            listen="0.0.0.0",
+            port=PORT,
+            webhook_url=os.getenv('WEBHOOK_URL')
+        )
+    else:
+        # Use polling in development
+        application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == '__main__':
     main()
