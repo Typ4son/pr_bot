@@ -1,6 +1,6 @@
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes, MessageHandler, filters
-import os, json, time, hashlib, asyncio
+import os, json, time, hashlib, asyncio, random
 from dotenv import load_dotenv
 import logging
 from datetime import datetime
@@ -209,32 +209,41 @@ class PRBotTelegram:
 
     async def handle_admin(self, query):
         """Enhanced Admin Control Panel"""
+        admin_menu = (
+            f"{self.header}"
+            "*👑 Admin Control Panel*\n\n"
+            "*Quick Stats:*\n"
+            f"• Active Users: {len(self.users)}\n"
+            f"• Active Tokens: {len(self.tokens.get('active', {}))}\n"
+            f"• Trial Users: {len(self.user_trials)}\n"
+            f"• Pending PRs: {len(self.pr_queue.get('pending', []))}\n\n"
+            "*Available Actions:*\n"
+            "• 👥 Users - Manage users\n"
+            "• 🎫 Tokens - Manage tokens\n"
+            "• 💰 Payments - Configure payments\n"
+            "• 📊 Stats - View analytics\n"
+            "• ⚙️ Settings - Bot configuration\n"
+            "• 🔒 Security - Access controls"
+        )
+        
         keyboard = [
             [
                 InlineKeyboardButton("👥 Users", callback_data='admin_users'),
                 InlineKeyboardButton("🎫 Tokens", callback_data='admin_tokens')
             ],
             [
-                InlineKeyboardButton("📊 Stats", callback_data='admin_stats'),
-                InlineKeyboardButton("⚙️ Settings", callback_data='admin_settings')
+                InlineKeyboardButton("💰 Payments", callback_data='admin_payments'),
+                InlineKeyboardButton("📊 Stats", callback_data='admin_stats')
             ],
             [
-                InlineKeyboardButton("🔄 Queue", callback_data='admin_queue'),
+                InlineKeyboardButton("⚙️ Settings", callback_data='admin_settings'),
                 InlineKeyboardButton("🔒 Security", callback_data='admin_security')
             ],
-            [InlineKeyboardButton("🔙 Back", callback_data='back_main')]
+            [InlineKeyboardButton("🔙 Main Menu", callback_data='back_main')]
         ]
         
         await query.edit_message_text(
-            f"{self.header}"
-            "*👑 Admin Control Panel*\n\n"
-            "Select a module to manage:\n\n"
-            "• 👥 Users: Manage user accounts\n"
-            "• 🎫 Tokens: Generate/monitor tokens\n"
-            "• 📊 Stats: System analytics\n"
-            "• ⚙️ Settings: Bot configuration\n"
-            "• 🔄 Queue: PR processing queue\n"
-            "• 🔒 Security: Security controls",
+            admin_menu,
             reply_markup=InlineKeyboardMarkup(keyboard),
             parse_mode='Markdown'
         )
@@ -348,13 +357,13 @@ class PRBotTelegram:
         )
 
     async def handle_trial(self, query):
-        """Handle free trial token generation"""
+        """Handle free trial token generation with instructions"""
         user_id = str(query.from_user.id)
         
         if user_id in self.user_trials:
             last_trial = self.user_trials[user_id]
-            if time.time() - last_trial < 86400:
-                hours_left = 24 - (time.time() - last_trial) / 3600
+            if time.time() - last_trial['timestamp'] < 86400:  # 24 hours
+                hours_left = 24 - (time.time() - last_trial['timestamp']) / 3600
                 await query.edit_message_text(
                     f"{self.header}"
                     "⚠️ *Trial Limit Reached*\n\n"
@@ -368,27 +377,427 @@ class PRBotTelegram:
                 )
                 return
 
-        trial_token = self.generate_token(86400, 3)
-        self.user_trials[user_id] = time.time()
+        # Generate trial token
+        trial_token = self.generate_token(86400, 3)  # 24 hours, 3 uses
+        self.user_trials[user_id] = {
+            'timestamp': time.time(),
+            'token': trial_token,
+            'uses_remaining': 3
+        }
         
+        # Save user data
         if user_id not in self.users:
             self.users[user_id] = {'balance': 0, 'tokens': []}
         self.users[user_id]['tokens'].append(trial_token)
         self.save_data()
         
-        await query.edit_message_text(
+        instructions = (
             f"{self.header}"
-            "🎁 *Your Trial Token*\n\n"
+            "🎁 *Your Trial Token is Ready!*\n\n"
+            "*Your Token:*\n"
             f"`{trial_token}`\n\n"
-            "✨ *Features*:\n"
+            "*How to Use:*\n"
+            "1️⃣ Send your text to this bot\n"
+            "2️⃣ Wait for processing\n"
+            "3️⃣ Receive your spun text\n\n"
+            "*Token Details:*\n"
             "• Valid for 24 hours\n"
             "• 3 uses included\n"
             "• Full access to all features\n\n"
-            "_Use this token to test our services_",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("💰 Buy Full Access", callback_data='purchase')],
-                [InlineKeyboardButton("🔙 Back", callback_data='back_main')]
-            ]),
+            "*Need Help?*\n"
+            "• Use /help for instructions\n"
+            "• Use /status to check token\n"
+            "• Contact support if needed"
+        )
+        
+        keyboard = [
+            [InlineKeyboardButton("✍️ Start Spinning", callback_data='start_spinning')],
+            [InlineKeyboardButton("📖 How to Use", callback_data='show_instructions')],
+            [InlineKeyboardButton("💰 Buy Full Access", callback_data='purchase')],
+            [InlineKeyboardButton("🔙 Back", callback_data='back_main')]
+        ]
+        
+        await query.edit_message_text(
+            instructions,
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode='Markdown'
+        )
+
+    async def start_spinning(self, query):
+        """Start text spinning process"""
+        await query.edit_message_text(
+            f"{self.header}"
+            "*✍️ Text Spinning*\n\n"
+            "Simply send your text to spin.\n\n"
+            "*Guidelines:*\n"
+            "• Send text in a single message\n"
+            "• Wait for processing\n"
+            "• Receive spun version\n\n"
+            "_Send your text now..._",
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("🔙 Back", callback_data='back_main')
+            ]]),
+            parse_mode='Markdown'
+        )
+
+    async def handle_text(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Enhanced text handling with formatting options"""
+        message = update.message
+        user_id = str(message.from_user.id)
+        text = message.text.strip()
+
+        # Validate token
+        valid_token = await self.validate_user_token(user_id)
+        if not valid_token:
+            await message.reply_text(
+                f"{self.header}"
+                "❌ *No Valid Token Found*\n\n"
+                "Please get a trial token or purchase access:",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("🎁 Free Trial", callback_data='trial')],
+                    [InlineKeyboardButton("💰 Buy Token", callback_data='purchase')]
+                ]),
+                parse_mode='Markdown'
+            )
+            return
+
+        # Process text
+        try:
+            processing_msg = await message.reply_text(
+                f"{self.header}"
+                "*🔄 Processing Text*\n\n"
+                "Please wait...",
+                parse_mode='Markdown'
+            )
+
+            # Get user preferences
+            user_prefs = self.get_user_preferences(user_id)
+            
+            results = await self.process_text(
+                text,
+                style=user_prefs.get('style', 'basic'),
+                variations=user_prefs.get('variations', 1),
+                format=user_prefs.get('format', 'markdown')
+            )
+            
+            # Update token usage
+            await self.update_token_usage(valid_token, user_id)
+            
+            # Get remaining uses
+            remaining_uses = self.tokens['active'][valid_token]['uses_remaining']
+
+            # Send results
+            if len(results) == 1:
+                # Single result
+                await processing_msg.edit_text(
+                    f"{self.header}"
+                    "*✅ Text Processed*\n\n"
+                    "*Original:*\n"
+                    f"`{text[:100]}...`\n\n"
+                    "*Spun Version:*\n"
+                    f"`{results[0][:100]}...`\n\n"
+                    f"*Uses Remaining: {remaining_uses}*",
+                    reply_markup=InlineKeyboardMarkup([
+                        [
+                            InlineKeyboardButton("🔄 New Spin", callback_data='spin_again'),
+                            InlineKeyboardButton("⚙️ Settings", callback_data='spin_settings')
+                        ],
+                        [InlineKeyboardButton("🔙 Back", callback_data='back_main')]
+                    ]),
+                    parse_mode='Markdown'
+                )
+                
+                # Send full text separately
+                await message.reply_text(
+                    "*Complete Spun Text:*\n\n"
+                    f"{results[0]}",
+                    parse_mode='Markdown'
+                )
+            else:
+                # Multiple variations
+                for i, result in enumerate(results, 1):
+                    await message.reply_text(
+                        f"*Version {i}:*\n\n{result}",
+                        parse_mode='Markdown'
+                    )
+
+        except Exception as e:
+            self.logger.error(f"Processing error: {str(e)}")
+            await processing_msg.edit_text(
+                f"{self.header}"
+                "❌ *Error Processing Text*\n\n"
+                f"Error: {str(e)}\n"
+                "Please try again or contact support.",
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("🔄 Try Again", callback_data='spin_again')
+                ]]),
+                parse_mode='Markdown'
+            )
+
+    async def process_text(self, text: str, style: str = 'basic', variations: int = 1, format: str = 'markdown'):
+        """Enhanced text processing with multiple algorithms"""
+        results = []
+        
+        for _ in range(variations):
+            if style == 'basic':
+                # Basic word replacement
+                spun = await self.basic_spin(text)
+            elif style == 'advanced':
+                # Advanced sentence restructuring
+                spun = await self.advanced_spin(text)
+            elif style == 'creative':
+                # Creative rewriting
+                spun = await self.creative_spin(text)
+            elif style == 'professional':
+                # Professional tone
+                spun = await self.professional_spin(text)
+            else:
+                spun = text
+                
+            # Apply formatting
+            formatted = self.apply_format(spun, format)
+            results.append(formatted)
+            
+        return results
+
+    async def basic_spin(self, text: str) -> str:
+        """Basic word replacement algorithm"""
+        # Implement your basic spinning logic here
+        words = text.split()
+        spun_words = []
+        
+        for word in words:
+            if word.lower() in self.synonyms:
+                spun_words.append(random.choice(self.synonyms[word.lower()]))
+            else:
+                spun_words.append(word)
+                
+        return ' '.join(spun_words)
+
+    async def advanced_spin(self, text: str) -> str:
+        """Advanced sentence restructuring"""
+        sentences = text.split('. ')
+        spun_sentences = []
+        
+        for sentence in sentences:
+            # Sentence structure variations
+            words = sentence.split()
+            if len(words) > 3:
+                # Apply different sentence patterns
+                pattern = random.choice(['normal', 'passive', 'question'])
+                if pattern == 'passive':
+                    # Convert to passive voice
+                    spun_sentence = self.to_passive(words)
+                elif pattern == 'question':
+                    # Convert to question form
+                    spun_sentence = self.to_question(words)
+                else:
+                    # Normal with synonyms
+                    spun_sentence = await self.basic_spin(sentence)
+            else:
+                spun_sentence = sentence
+                
+            spun_sentences.append(spun_sentence)
+            
+        return '. '.join(spun_sentences)
+
+    async def creative_spin(self, text: str) -> str:
+        """Creative rewriting with style variations"""
+        paragraphs = text.split('\n\n')
+        spun_paragraphs = []
+        
+        for para in paragraphs:
+            # Add transitional phrases
+            transitions = [
+                "Interestingly,", "Moreover,", "In addition,",
+                "Furthermore,", "Notably,", "Specifically,"
+            ]
+            
+            if random.random() > 0.7:  # 30% chance to add transition
+                para = f"{random.choice(transitions)} {para}"
+                
+            # Apply advanced spinning
+            spun_para = await self.advanced_spin(para)
+            spun_paragraphs.append(spun_para)
+            
+        return '\n\n'.join(spun_paragraphs)
+
+    async def professional_spin(self, text: str) -> str:
+        """Professional tone rewriting"""
+        # Replace casual words with professional alternatives
+        professional_replacements = {
+            'good': ['excellent', 'exceptional', 'outstanding'],
+            'bad': ['unfavorable', 'suboptimal', 'inadequate'],
+            'big': ['substantial', 'significant', 'considerable'],
+            # Add more professional word replacements
+        }
+        
+        words = text.split()
+        professional_words = []
+        
+        for word in words:
+            lower_word = word.lower()
+            if lower_word in professional_replacements:
+                replacement = random.choice(professional_replacements[lower_word])
+                professional_words.append(replacement)
+            else:
+                professional_words.append(word)
+                
+        return ' '.join(professional_words)
+
+    def apply_format(self, text: str, format: str) -> str:
+        """Apply formatting to text"""
+        if format == 'markdown':
+            # Add markdown formatting
+            paragraphs = text.split('\n\n')
+            formatted = []
+            
+            for i, para in enumerate(paragraphs):
+                if i == 0:
+                    # First paragraph in bold
+                    formatted.append(f"*{para}*")
+                else:
+                    # Add bullet points to other paragraphs
+                    formatted.append(f"• {para}")
+                    
+            return '\n\n'.join(formatted)
+            
+        elif format == 'html':
+            # Clean and format text for Telegram HTML
+            clean_text = text.replace('<', '&lt;').replace('>', '&gt;')
+            paragraphs = clean_text.split('\n\n')
+            formatted = []
+            
+            for i, para in enumerate(paragraphs):
+                if i == 0:
+                    # First paragraph bold
+                    formatted.append(f"<b>{para}</b>")
+                else:
+                    # Regular paragraphs
+                    formatted.append(para)
+                    
+            return '\n\n'.join(formatted)
+            
+        elif format == 'clean':
+            # Remove all formatting and special characters
+            clean_text = text
+            # Remove markdown
+            clean_text = clean_text.replace('*', '').replace('_', '').replace('`', '')
+            # Remove HTML
+            clean_text = clean_text.replace('<', '').replace('>', '')
+            # Remove extra spaces
+            clean_text = ' '.join(clean_text.split())
+            return clean_text
+            
+        elif format == 'simple':
+            # Basic text with minimal formatting
+            paragraphs = text.split('\n\n')
+            return '\n\n'.join(f"- {p.strip()}" for p in paragraphs)
+            
+        # Default: return original text
+        return text
+
+    async def handle_batch_process(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Enhanced batch processing with progress updates"""
+        message = update.message
+        user_id = str(message.from_user.id)
+        
+        if not message.document:
+            await message.reply_text(
+                f"{self.header}"
+                "*📦 Batch Processing*\n\n"
+                "*Supported Formats:*\n"
+                "• Text file (.txt)\n"
+                "• One text per line\n"
+                "• Max 100 texts per batch\n\n"
+                "*How to Use:*\n"
+                "1. Prepare your text file\n"
+                "2. Upload to this chat\n"
+                "3. Select processing options\n"
+                "4. Wait for results",
+                parse_mode='Markdown'
+            )
+            return
+
+        try:
+            # Download and process file
+            file = await context.bot.get_file(message.document.file_id)
+            file_content = await file.download_as_bytearray()
+            texts = file_content.decode('utf-8').split('\n\n')
+            
+            if len(texts) > 100:
+                await message.reply_text(
+                    f"{self.header}"
+                    "❌ *Batch Too Large*\n\n"
+                    "Maximum 100 texts per batch allowed.",
+                    parse_mode='Markdown'
+                )
+                return
+
+            # Show processing options
+            keyboard = [
+                [
+                    InlineKeyboardButton("Basic", callback_data=f'batch_basic_{message.document.file_id}'),
+                    InlineKeyboardButton("Advanced", callback_data=f'batch_advanced_{message.document.file_id}')
+                ],
+                [
+                    InlineKeyboardButton("Creative", callback_data=f'batch_creative_{message.document.file_id}'),
+                    InlineKeyboardButton("Professional", callback_data=f'batch_professional_{message.document.file_id}')
+                ],
+                [InlineKeyboardButton("❌ Cancel", callback_data='cancel_batch')]
+            ]
+            
+            await message.reply_text(
+                f"{self.header}"
+                "*📦 Select Processing Style*\n\n"
+                f"• Texts to process: {len(texts)}\n"
+                "• Estimated time: ~{len(texts) * 2} seconds\n\n"
+                "Choose spinning style:",
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                parse_mode='Markdown'
+            )
+
+        except Exception as e:
+            self.logger.error(f"Batch processing error: {str(e)}")
+            await message.reply_text(
+                f"{self.header}"
+                "❌ *Error Processing Batch*\n\n"
+                "Please check your file and try again.",
+                parse_mode='Markdown'
+            )
+
+    async def show_instructions(self, query):
+        """Show detailed usage instructions"""
+        instructions = (
+            f"{self.header}"
+            "*📖 How to Use TYP4SON Bot*\n\n"
+            "*Step-by-Step Guide:*\n\n"
+            "1️⃣ *Get Your Token*\n"
+            "• Use trial or purchase token\n"
+            "• Keep token secure\n\n"
+            "2️⃣ *Send Text*\n"
+            "• Send text to this bot\n"
+            "• One message at a time\n\n"
+            "3️⃣ *Receive Results*\n"
+            "• Wait for processing\n"
+            "• Get spun version\n\n"
+            "4️⃣ *Monitor Usage*\n"
+            "• Check remaining uses\n"
+            "• Purchase more if needed\n\n"
+            "*Commands:*\n"
+            "• /start - Main menu\n"
+            "• /help - Show this guide\n"
+            "• /status - Check token status"
+        )
+        
+        keyboard = [
+            [InlineKeyboardButton("✍️ Start Spinning", callback_data='start_spinning')],
+            [InlineKeyboardButton("🔙 Back", callback_data='back_main')]
+        ]
+        
+        await query.edit_message_text(
+            instructions,
+            reply_markup=InlineKeyboardMarkup(keyboard),
             parse_mode='Markdown'
         )
 
@@ -1115,6 +1524,120 @@ class PRBotTelegram:
             return False, 0
         return False, -1
 
+    async def show_spin_options(self, query):
+        """Show spinning options menu"""
+        keyboard = [
+            [
+                InlineKeyboardButton("🔄 Basic Spin", callback_data='spin_basic'),
+                InlineKeyboardButton("✨ Advanced Spin", callback_data='spin_advanced')
+            ],
+            [
+                InlineKeyboardButton("📝 Multiple Versions", callback_data='spin_multiple'),
+                InlineKeyboardButton("📦 Batch Process", callback_data='spin_batch')
+            ],
+            [
+                InlineKeyboardButton("⚙️ Settings", callback_data='spin_settings'),
+                InlineKeyboardButton("❓ Help", callback_data='spin_help')
+            ],
+            [InlineKeyboardButton("🔙 Back", callback_data='back_main')]
+        ]
+        
+        await query.edit_message_text(
+            f"{self.header}"
+            "*✍️ Text Spinning Options*\n\n"
+            "*Available Features:*\n\n"
+            "🔄 *Basic Spin*\n"
+            "• Simple text rewriting\n"
+            "• Quick processing\n\n"
+            "✨ *Advanced Spin*\n"
+            "• Deep rewriting\n"
+            "• Multiple synonyms\n\n"
+            "📝 *Multiple Versions*\n"
+            "• Get several variants\n"
+            "• Different styles\n\n"
+            "📦 *Batch Process*\n"
+            "• Multiple texts at once\n"
+            "• Bulk processing\n\n"
+            "_Select an option to continue_",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode='Markdown'
+        )
+
+    async def handle_batch_upload(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle batch text processing"""
+        message = update.message
+        user_id = str(message.from_user.id)
+        
+        # Check if file is uploaded
+        if not message.document:
+            await message.reply_text(
+                f"{self.header}"
+                "❌ *Invalid Format*\n\n"
+                "Please upload a text file (.txt)",
+                parse_mode='Markdown'
+            )
+            return
+
+        # Validate token
+        valid_token = await self.validate_user_token(user_id)
+        if not valid_token:
+            await message.reply_text(
+                f"{self.header}"
+                "❌ *No Valid Token Found*\n\n"
+                "Please get a token first:",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("🎁 Free Trial", callback_data='trial')],
+                    [InlineKeyboardButton("💰 Buy Token", callback_data='purchase')]
+                ]),
+                parse_mode='Markdown'
+            )
+            return
+
+        try:
+            # Download file
+            file = await context.bot.get_file(message.document.file_id)
+            file_content = await file.download_as_bytearray()
+            texts = file_content.decode('utf-8').split('\n\n')
+
+            # Process each text
+            processing_msg = await message.reply_text(
+                f"{self.header}"
+                "*🔄 Processing Batch*\n\n"
+                f"Total texts: {len(texts)}\n"
+                "Please wait...",
+                parse_mode='Markdown'
+            )
+
+            results = []
+            for text in texts:
+                if text.strip():
+                    spun = await self.spin_text(text)
+                    results.append(spun)
+
+            # Save results
+            output = '\n\n'.join(results)
+            with open(f'spun_batch_{user_id}.txt', 'w') as f:
+                f.write(output)
+
+            # Send results file
+            await message.reply_document(
+                document=open(f'spun_batch_{user_id}.txt', 'rb'),
+                caption=f"{self.header}✅ *Batch Processing Complete*\n\n"
+                        f"• Processed: {len(results)} texts\n"
+                        "• Format: TXT file\n\n"
+                        "_Download the file to see results_",
+                parse_mode='Markdown'
+            )
+
+        except Exception as e:
+            self.logger.error(f"Batch processing error: {str(e)}")
+            await processing_msg.edit_text(
+                f"{self.header}"
+                "❌ *Batch Processing Error*\n\n"
+                "Please try again or contact support.",
+                parse_mode='Markdown'
+            )
+
 def main():
     """Start the bot"""
     application = Application.builder().token(TELEGRAM_TOKEN).build()
@@ -1122,10 +1645,10 @@ def main():
 
     # Add handlers
     application.add_handler(CommandHandler("start", bot.start))
-    application.add_handler(CommandHandler("help", bot.show_help))
-    application.add_handler(CommandHandler("redeem", bot.redeem_token))
+    application.add_handler(CommandHandler("help", bot.show_instructions))
+    application.add_handler(CommandHandler("status", bot.show_token_status))
     application.add_handler(CallbackQueryHandler(bot.handle_callback))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, bot.handle_pr))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, bot.handle_text))
 
     print('Bot is starting...')
     if os.getenv('ENVIRONMENT') == 'production':
