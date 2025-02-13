@@ -16,6 +16,10 @@ class PRBotTelegram:
         self.user_trials = {}
         self.tokens = self.load_tokens()
         self.users = self.load_users()
+        self.header = (
+            "🤖 *TYP4SON BOT*\n"
+            "━━━━━━━━━━━━━━━\n\n"
+        )
 
     def load_tokens(self):
         try:
@@ -49,8 +53,8 @@ class PRBotTelegram:
             keyboard.append([InlineKeyboardButton("👑 Admin Panel", callback_data='admin')])
 
         await update.message.reply_text(
-            "*Welcome to PR Bot!*\n\n"
-            "Select an option below:",
+            f"{self.header}"
+            "Welcome! Choose an option below:",
             reply_markup=InlineKeyboardMarkup(keyboard),
             parse_mode='Markdown'
         )
@@ -61,6 +65,7 @@ class PRBotTelegram:
         user_data = self.users.get(str(user_id), {})
         
         profile_text = (
+            f"{self.header}"
             "*👤 Profile Information*\n\n"
             f"🆔 User ID: `{user_id}`\n"
             f"💰 Balance: ${user_data.get('balance', 0):.2f}\n"
@@ -94,6 +99,7 @@ class PRBotTelegram:
         ]
         
         await query.edit_message_text(
+            f"{self.header}"
             "*👑 Admin Control Panel*\n\n"
             "Select an option to manage:",
             reply_markup=InlineKeyboardMarkup(keyboard),
@@ -130,8 +136,8 @@ class PRBotTelegram:
                     keyboard.append([InlineKeyboardButton("👑 Admin Panel", callback_data='admin')])
                 
                 await query.edit_message_text(
-                    "*Welcome to PR Bot!*\n\n"
-                    "Select an option below:",
+                    f"{self.header}"
+                    "Welcome! Choose an option below:",
                     reply_markup=InlineKeyboardMarkup(keyboard),
                     parse_mode='Markdown'
                 )
@@ -143,6 +149,7 @@ class PRBotTelegram:
         except Exception as e:
             self.logger.error(f"Callback error: {str(e)}")
             await query.edit_message_text(
+                f"{self.header}"
                 "An error occurred. Please try /start again.",
                 reply_markup=InlineKeyboardMarkup([[
                     InlineKeyboardButton("🔄 Start Over", callback_data='back_main')
@@ -157,7 +164,7 @@ class PRBotTelegram:
             all_users = list(self.users.items())
             total_pages = (len(all_users) + users_per_page - 1) // users_per_page
             
-            users_text = "*👥 User Management*\n\n"
+            users_text = f"{self.header}👥 User Management*\n\n"
             start_idx = page * users_per_page
             end_idx = min(start_idx + users_per_page, len(all_users))
             
@@ -180,6 +187,151 @@ class PRBotTelegram:
                 reply_markup=InlineKeyboardMarkup(keyboard),
                 parse_mode='Markdown'
             )
+
+    async def handle_trial(self, query):
+        """Handle free trial token generation"""
+        user_id = str(query.from_user.id)
+        
+        if user_id in self.user_trials:
+            last_trial = self.user_trials[user_id]
+            if time.time() - last_trial < 86400:
+                hours_left = 24 - (time.time() - last_trial) / 3600
+                await query.edit_message_text(
+                    f"{self.header}"
+                    "⚠️ *Trial Limit Reached*\n\n"
+                    f"Please wait {int(hours_left)} hours for a new trial.\n"
+                    "Or purchase a token below:",
+                    reply_markup=InlineKeyboardMarkup([
+                        [InlineKeyboardButton("💰 Purchase Token", callback_data='purchase')],
+                        [InlineKeyboardButton("🔙 Back", callback_data='back_main')]
+                    ]),
+                    parse_mode='Markdown'
+                )
+                return
+
+        trial_token = self.generate_token(86400, 3)
+        self.user_trials[user_id] = time.time()
+        
+        if user_id not in self.users:
+            self.users[user_id] = {'balance': 0, 'tokens': []}
+        self.users[user_id]['tokens'].append(trial_token)
+        self.save_data()
+        
+        await query.edit_message_text(
+            f"{self.header}"
+            "🎁 *Your Trial Token*\n\n"
+            f"`{trial_token}`\n\n"
+            "✨ *Features*:\n"
+            "• Valid for 24 hours\n"
+            "• 3 uses included\n"
+            "• Full access to all features\n\n"
+            "_Use this token to test our services_",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("💰 Buy Full Access", callback_data='purchase')],
+                [InlineKeyboardButton("🔙 Back", callback_data='back_main')]
+            ]),
+            parse_mode='Markdown'
+        )
+
+    async def show_purchase_options(self, query):
+        """Show available purchase plans"""
+        plans = {
+            'daily': {'price': 5, 'uses': 10, 'duration': '1 Day'},
+            'weekly': {'price': 25, 'uses': 100, 'duration': '1 Week'},
+            'monthly': {'price': 80, 'uses': 500, 'duration': '1 Month'}
+        }
+        
+        message = f"{self.header}💰 Available Plans*\n\n"
+        keyboard = []
+        
+        for plan_id, details in plans.items():
+            message += (
+                f"*{details['duration']}*\n"
+                f"💵 Price: ${details['price']}\n"
+                f"🎫 Uses: {details['uses']}\n"
+                "━━━━━━━━━━\n"
+            )
+            keyboard.append([
+                InlineKeyboardButton(
+                    f"Buy {details['duration']} (${details['price']})",
+                    callback_data=f'buy_{plan_id}'
+                )
+            ])
+        
+        keyboard.append([
+            InlineKeyboardButton("💳 Add Funds", callback_data='add_funds'),
+            InlineKeyboardButton("🔙 Back", callback_data='back_main')
+        ])
+        
+        await query.edit_message_text(
+            message,
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode='Markdown'
+        )
+
+    async def handle_purchase(self, query, plan):
+        """Handle token purchase"""
+        user_id = str(query.from_user.id)
+        plans = {
+            'daily': {'price': 5, 'uses': 10, 'duration': 86400},
+            'weekly': {'price': 25, 'uses': 100, 'duration': 604800},
+            'monthly': {'price': 80, 'uses': 500, 'duration': 2592000}
+        }
+        
+        if plan not in plans:
+            await query.edit_message_text(
+                f"{self.header}"
+                "❌ Invalid plan selected.",
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("🔙 Back", callback_data='purchase')
+                ]])
+            )
+            return
+        
+        plan_details = plans[plan]
+        user_balance = self.users.get(user_id, {}).get('balance', 0)
+        
+        if user_balance < plan_details['price']:
+            await query.edit_message_text(
+                f"{self.header}"
+                "❌ *Insufficient Balance*\n\n"
+                f"Required: ${plan_details['price']}\n"
+                f"Your Balance: ${user_balance}\n\n"
+                "Please add funds to continue:",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("💳 Add Funds", callback_data='add_funds')],
+                    [InlineKeyboardButton("🔙 Back", callback_data='purchase')]
+                ]),
+                parse_mode='Markdown'
+            )
+            return
+        
+        # Generate token
+        token = self.generate_token(
+            plan_details['duration'],
+            plan_details['uses']
+        )
+        
+        # Update user data
+        if user_id not in self.users:
+            self.users[user_id] = {'balance': 0, 'tokens': []}
+        self.users[user_id]['balance'] -= plan_details['price']
+        self.users[user_id]['tokens'].append(token)
+        self.save_data()
+        
+        await query.edit_message_text(
+            f"{self.header}"
+            "✅ *Purchase Successful!*\n\n"
+            f"Your new token:\n`{token}`\n\n"
+            f"Duration: {plan_details['duration'] // 86400} days\n"
+            f"Uses: {plan_details['uses']}\n"
+            f"Remaining Balance: ${self.users[user_id]['balance']:.2f}",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔙 Back to Shop", callback_data='purchase')],
+                [InlineKeyboardButton("🏠 Main Menu", callback_data='back_main')]
+            ]),
+            parse_mode='Markdown'
+        )
 
 def main():
     application = Application.builder().token(TELEGRAM_TOKEN).build()
