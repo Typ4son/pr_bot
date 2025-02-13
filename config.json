@@ -1,0 +1,16 @@
+{
+    "common_form_fields": {
+        "username": "//input[@name='username']",
+        "email": "//input[@name='email']",
+        "password": "//input[@name='password']",
+        "first_name": "//input[@name='firstName']",
+        "last_name": "//input[@name='lastName']",
+        "phone": "//input[@name='phone']",
+        "address": "//input[@name='address']",
+        "birth_date": "//input[@name='birthDate']",
+        "ssn": "//input[@name='ssn']",
+        "zip_code": "//input[@name='zipCode']",
+        "city": "//input[@name='city']",
+        "state": "//input[@name='state']"
+    }
+} 

@@ -1,0 +1,6 @@
+2025-02-11 03:01:25,974 - INFO - ====== WebDriver manager ======
+2025-02-11 03:01:27,879 - INFO - Get LATEST chromedriver version for google-chrome
+2025-02-11 03:01:27,953 - INFO - Get LATEST chromedriver version for google-chrome
+2025-02-11 03:01:28,008 - INFO - Driver [C:\Users\otamb\.wdm\drivers\chromedriver\win64\132.0.6834.159\chromedriver-win32/chromedriver.exe] found in cache
+2025-02-11 03:05:09,225 - WARNING - Retrying (Retry(total=2, connect=None, read=None, redirect=None, status=None)) after connection broken by 'NewConnectionError('<urllib3.connection.HTTPConnection object at 0x000001C000569510>: Failed to establish a new connection: [WinError 10061] No connection could be made because the target machine actively refused it')': /session/04464ac74c5df1ece7cfc346946e02bb
+2025-02-11 03:05:13,306 - WARNING - Retrying (Retry(total=1, connect=None, read=None, redirect=None, status=None)) after connection broken by 'NewConnectionError('<urllib3.connection.HTTPConnection object at 0x000001C00056A310>: Failed to establish a new connection: [WinError 10061] No connection could be made because the target machine actively refused it')': /session/04464ac74c5df1ece7cfc346946e02bb

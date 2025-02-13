@@ -1,0 +1,12 @@
+2025-02-11 02:36:58,849 - INFO - ====== WebDriver manager ======
+2025-02-11 02:37:03,147 - INFO - Get LATEST chromedriver version for google-chrome
+2025-02-11 02:37:03,276 - INFO - Get LATEST chromedriver version for google-chrome
+2025-02-11 02:37:03,342 - INFO - Get LATEST chromedriver version for google-chrome
+2025-02-11 02:37:03,503 - INFO - WebDriver version 132.0.6834.159 selected
+2025-02-11 02:37:03,508 - INFO - Modern chrome version https://storage.googleapis.com/chrome-for-testing-public/132.0.6834.159/win32/chromedriver-win32.zip
+2025-02-11 02:37:03,510 - INFO - About to download new driver from https://storage.googleapis.com/chrome-for-testing-public/132.0.6834.159/win32/chromedriver-win32.zip
+2025-02-11 02:37:03,686 - INFO - Driver downloading response is 200
+2025-02-11 02:37:04,906 - INFO - Get LATEST chromedriver version for google-chrome
+2025-02-11 02:37:05,751 - INFO - Driver has been saved in cache [C:\Users\otamb\.wdm\drivers\chromedriver\win64\132.0.6834.159]
+2025-02-11 02:37:05,751 - ERROR - Browser setup error: WebDriver.__init__() got multiple values for argument 'options'
+2025-02-11 02:37:05,751 - ERROR - Initialization error: WebDriver.__init__() got multiple values for argument 'options'
