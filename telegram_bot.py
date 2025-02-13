@@ -80,36 +80,51 @@ class PRBotTelegram:
 
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Start command handler"""
-        user = update.effective_user
-        keyboard = [
-            [
-                InlineKeyboardButton("💰 Balance", callback_data='balance'),
-                InlineKeyboardButton("🔄 Forward", callback_data='forward')
-            ],
-            [
-                InlineKeyboardButton("⬅️ Backup", callback_data='backup'),
-                InlineKeyboardButton("👤 Profile", callback_data='profile')
-            ],
-            [InlineKeyboardButton("🎫 Purchase Token", callback_data='purchase')],
-        ]
-        
-        if update.effective_user.id == ADMIN_USER_ID:
-            keyboard.append([InlineKeyboardButton("👑 Admin Panel", callback_data='admin')])
-        
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        welcome_text = (
-            f"*Welcome {user.first_name}!*\n\n"
-            f"🆔 Account ID: `{user.id}`\n"
-            "━━━━━━━━━━━━━━━\n"
-            "Select an option below:"
-        )
-        
-        await update.message.reply_text(
-            welcome_text,
-            reply_markup=reply_markup,
-            parse_mode='Markdown'
-        )
+        try:
+            user = update.effective_user
+            keyboard = [
+                [
+                    InlineKeyboardButton("💰 Balance", callback_data='balance'),
+                    InlineKeyboardButton("🔄 Forward", callback_data='forward')
+                ],
+                [
+                    InlineKeyboardButton("⬅️ Backup", callback_data='backup'),
+                    InlineKeyboardButton("👤 Profile", callback_data='profile')
+                ],
+                [InlineKeyboardButton("🎫 Purchase Token", callback_data='purchase')],
+            ]
+            
+            if update.effective_user.id == ADMIN_USER_ID:
+                keyboard.append([InlineKeyboardButton("👑 Admin Panel", callback_data='admin')])
+            
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            welcome_text = (
+                f"*Welcome {user.first_name}!*\n\n"
+                f"🆔 Account ID: `{user.id}`\n"
+                "━━━━━━━━━━━━━━━\n"
+                "Select an option below:"
+            )
+            
+            if hasattr(update, 'message') and update.message:
+                await update.message.reply_text(
+                    welcome_text,
+                    reply_markup=reply_markup,
+                    parse_mode='Markdown'
+                )
+            elif hasattr(update, 'callback_query') and update.callback_query:
+                await update.callback_query.edit_message_text(
+                    welcome_text,
+                    reply_markup=reply_markup,
+                    parse_mode='Markdown'
+                )
+        except Exception as e:
+            self.logger.error(f"Error in start: {str(e)}")
+            error_message = "Sorry, something went wrong. Please try again."
+            if hasattr(update, 'message') and update.message:
+                await update.message.reply_text(error_message)
+            elif hasattr(update, 'callback_query') and update.callback_query:
+                await update.callback_query.answer(error_message)
 
     async def generate_new_token(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Generate new token - admin only"""
@@ -271,17 +286,48 @@ class PRBotTelegram:
 
     async def button_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle button presses"""
-        query = update.callback_query
-        await query.answer()
+        try:
+            query = update.callback_query
+            await query.answer()
 
-        if query.data == 'profile':
-            await self.show_profile(update, context)
-        elif query.data in ['forward', 'backup']:
-            await self.forward_backup(update, context)
-        elif query.data.startswith('crypto_'):
-            await self.handle_payment(update, context)
-        elif query.data == 'back_to_main':
-            await self.start(update, context)
+            if query.data == 'profile':
+                await self.show_profile(update, context)
+            elif query.data in ['forward', 'backup']:
+                await self.forward_backup(update, context)
+            elif query.data.startswith('crypto_'):
+                await self.handle_payment(update, context)
+            elif query.data == 'back_to_main':
+                await self.start(update, context)
+            elif query.data == 'balance':
+                await self.show_balance(update, context)
+            elif query.data == 'purchase':
+                await self.show_purchase_options(update, context)
+        except Exception as e:
+            self.logger.error(f"Error in button_handler: {str(e)}")
+            await query.answer("Sorry, something went wrong. Please try again.")
+
+    async def show_balance(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Show user balance"""
+        try:
+            user_id = str(update.effective_user.id)
+            balance = self.get_user_balance(user_id)
+            
+            keyboard = [
+                [InlineKeyboardButton("💳 Add Funds", callback_data='add_funds')],
+                [InlineKeyboardButton("🔙 Back", callback_data='back_to_main')]
+            ]
+            
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await update.callback_query.edit_message_text(
+                f"*💰 Your Balance*\n\n"
+                f"Current Balance: ${balance:.2f}\n"
+                "━━━━━━━━━━━━━━━",
+                reply_markup=reply_markup,
+                parse_mode='Markdown'
+            )
+        except Exception as e:
+            self.logger.error(f"Error in show_balance: {str(e)}")
+            await update.callback_query.answer("Error showing balance. Please try again.")
 
 def main():
     """Start the bot"""
