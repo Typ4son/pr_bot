@@ -400,14 +400,18 @@ class PRBotTelegram:
             'monthly': {'price': 80, 'uses': 500, 'duration': '1 Month'}
         }
         
-        message = f"{self.header}💰 Available Plans*\n\n"
+        message = (
+            f"{self.header}"
+            "*💰 Available Plans*\n\n"
+        )
+        
         keyboard = []
         
         for plan_id, details in plans.items():
             message += (
                 f"*{details['duration']}*\n"
-                f"💵 Price: ${details['price']}\n"
-                f"🎫 Uses: {details['uses']}\n"
+                f"• Price: ${details['price']}\n"
+                f"• Uses: {details['uses']}\n"
                 "━━━━━━━━━━\n"
             )
             keyboard.append([
@@ -417,9 +421,9 @@ class PRBotTelegram:
                 )
             ])
         
-        keyboard.append([
-            InlineKeyboardButton("💳 Add Funds", callback_data='add_funds'),
-            InlineKeyboardButton("🔙 Back", callback_data='back_main')
+        keyboard.extend([
+            [InlineKeyboardButton("💳 Payment Methods", callback_data='show_payment_methods')],
+            [InlineKeyboardButton("🔙 Back", callback_data='back_main')]
         ])
         
         await query.edit_message_text(
@@ -956,6 +960,160 @@ class PRBotTelegram:
         }
         self.active_sessions = {}
         self.blocked_ips = set()
+
+    async def setup_payment_methods(self, query):
+        """Admin: Setup payment methods"""
+        keyboard = [
+            [
+                InlineKeyboardButton("💰 Crypto Settings", callback_data='admin_crypto_setup'),
+                InlineKeyboardButton("💳 Other Methods", callback_data='admin_other_payments')
+            ],
+            [
+                InlineKeyboardButton("📋 View Current", callback_data='admin_view_payments'),
+                InlineKeyboardButton("✏️ Edit", callback_data='admin_edit_payments')
+            ],
+            [InlineKeyboardButton("🔙 Back to Admin", callback_data='admin')]
+        ]
+        
+        await query.edit_message_text(
+            f"{self.header}"
+            "*💰 Payment Method Setup*\n\n"
+            "Configure payment methods and addresses.\n"
+            "Current methods:\n\n"
+            "• Crypto (BTC/ETH/USDT)\n"
+            "• Other payment methods\n\n"
+            "Select an option to configure:",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode='Markdown'
+        )
+
+    async def setup_crypto_payments(self, query):
+        """Admin: Setup crypto payment addresses"""
+        current_addresses = self.get_payment_addresses()
+        
+        message = (
+            f"{self.header}"
+            "*🪙 Crypto Payment Setup*\n\n"
+            "*Current Addresses:*\n"
+            f"BTC: `{current_addresses.get('btc', 'Not set')}`\n"
+            f"ETH: `{current_addresses.get('eth', 'Not set')}`\n"
+            f"USDT: `{current_addresses.get('usdt', 'Not set')}`\n\n"
+            "Select cryptocurrency to edit:"
+        )
+        
+        keyboard = [
+            [
+                InlineKeyboardButton("Bitcoin (BTC)", callback_data='set_crypto_btc'),
+                InlineKeyboardButton("Ethereum (ETH)", callback_data='set_crypto_eth')
+            ],
+            [
+                InlineKeyboardButton("USDT (TRC20)", callback_data='set_crypto_usdt'),
+                InlineKeyboardButton("View QR", callback_data='view_crypto_qr')
+            ],
+            [InlineKeyboardButton("🔙 Back", callback_data='admin_payment_setup')]
+        ]
+        
+        await query.edit_message_text(
+            message,
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode='Markdown'
+        )
+
+    async def show_payment_methods(self, query):
+        """Show available payment methods"""
+        message = (
+            f"{self.header}"
+            "*💳 Payment Methods*\n\n"
+            "*Cryptocurrency:*\n"
+            "• Bitcoin (BTC)\n"
+            "• Ethereum (ETH)\n"
+            "• USDT (TRC20)\n\n"
+            "Select your preferred payment method:"
+        )
+        
+        keyboard = [
+            [
+                InlineKeyboardButton("Bitcoin (BTC)", callback_data='pay_crypto_btc'),
+                InlineKeyboardButton("Ethereum (ETH)", callback_data='pay_crypto_eth')
+            ],
+            [
+                InlineKeyboardButton("USDT (TRC20)", callback_data='pay_crypto_usdt')
+            ],
+            [InlineKeyboardButton("🔙 Back to Plans", callback_data='purchase')]
+        ]
+        
+        await query.edit_message_text(
+            message,
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode='Markdown'
+        )
+
+    async def process_crypto_payment(self, query, crypto):
+        """Process crypto payment"""
+        payment_addresses = self.get_payment_addresses()
+        address = payment_addresses.get(crypto.lower())
+        
+        if not address:
+            await query.edit_message_text(
+                f"{self.header}"
+                "❌ *Payment Method Unavailable*\n\n"
+                "Please choose a different payment method or try again later.",
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("🔙 Back", callback_data='show_payment_methods')
+                ]]),
+                parse_mode='Markdown'
+            )
+            return
+        
+        message = (
+            f"{self.header}"
+            f"*{crypto.upper()} Payment*\n\n"
+            "*Send payment to:*\n"
+            f"`{address}`\n\n"
+            "*Instructions:*\n"
+            "1. Copy the address above\n"
+            "2. Send the exact amount\n"
+            "3. Click 'I've Paid' below\n"
+            "4. Wait for confirmation\n\n"
+            "_Payment will be verified automatically_"
+        )
+        
+        keyboard = [
+            [InlineKeyboardButton("✅ I've Paid", callback_data=f'verify_payment_{crypto.lower()}')],
+            [InlineKeyboardButton("🔙 Back", callback_data='show_payment_methods')]
+        ]
+        
+        await query.edit_message_text(
+            message,
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode='Markdown'
+        )
+
+    def get_payment_addresses(self):
+        """Get configured payment addresses"""
+        try:
+            with open('payment_config.json', 'r') as f:
+                return json.load(f)
+        except FileNotFoundError:
+            return {
+                'btc': '',
+                'eth': '',
+                'usdt': ''
+            }
+
+    async def handle_trial_usage(self, user_id: str, pr_url: str):
+        """Handle trial token usage"""
+        if user_id in self.user_trials:
+            trial_data = self.user_trials[user_id]
+            if trial_data['uses_remaining'] > 0:
+                # Process PR with trial token
+                success = await self.process_pr(pr_url)
+                if success:
+                    trial_data['uses_remaining'] -= 1
+                    self.save_data()
+                    return True, trial_data['uses_remaining']
+            return False, 0
+        return False, -1
 
 def main():
     """Start the bot"""
