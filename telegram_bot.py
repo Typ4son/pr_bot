@@ -30,6 +30,7 @@ class PRBotTelegram:
         }
         self.active_sessions = {}
         self.blocked_ips = set()
+        self.notification_task = None
 
     def load_tokens(self):
         try:
@@ -1791,14 +1792,72 @@ class PRBotTelegram:
             self.user_trials = {}
             self.user_preferences = {}
 
-def main():
+    async def start_notification_checker(self):
+        """Start the notification checker"""
+        try:
+            if self.notification_task is None:
+                self.notification_task = asyncio.create_task(self.check_and_notify())
+                self.logger.info("Notification checker started")
+        except Exception as e:
+            self.logger.error(f"Failed to start notification checker: {str(e)}")
+
+    async def stop_notification_checker(self):
+        """Stop the notification checker"""
+        if self.notification_task:
+            self.notification_task.cancel()
+            try:
+                await self.notification_task
+            except asyncio.CancelledError:
+                pass
+            self.notification_task = None
+            self.logger.info("Notification checker stopped")
+
+    async def check_and_notify(self):
+        """Periodic check for notifications"""
+        while True:
+            try:
+                current_time = time.time()
+                
+                # Check expiring tokens
+                for user_id, user_data in self.users.items():
+                    for token in user_data.get('tokens', []):
+                        if token in self.tokens.get('active', {}):
+                            token_data = self.tokens['active'][token]
+                            expiry_time = token_data['created_at'] + token_data['duration']
+                            days_left = (expiry_time - current_time) / 86400
+                            
+                            # Notify if token expires in 3 days
+                            if 2.5 < days_left < 3:
+                                await self.send_notification(
+                                    user_id,
+                                    'token_expiring',
+                                    days_left=int(days_left),
+                                    token=token
+                                )
+                            
+                            # Notify if token has low uses
+                            if token_data.get('uses_remaining', 0) <= 3:
+                                await self.send_notification(
+                                    user_id,
+                                    'low_uses',
+                                    uses_left=token_data['uses_remaining'],
+                                    token=token
+                                )
+                
+                # Sleep for 6 hours before next check
+                await asyncio.sleep(21600)
+                
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                self.logger.error(f"Notification check error: {str(e)}")
+                await asyncio.sleep(300)  # Wait 5 minutes on error
+
+async def main():
     """Start the bot"""
     application = Application.builder().token(TELEGRAM_TOKEN).build()
     bot = PRBotTelegram()
     
-    # Start notification checker
-    bot.start_notification_checker()
-
     # Add handlers
     application.add_handler(CommandHandler("start", bot.start))
     application.add_handler(CommandHandler("help", bot.show_instructions))
@@ -1806,13 +1865,16 @@ def main():
     application.add_handler(CallbackQueryHandler(bot.handle_callback))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, bot.handle_text))
 
+    # Start notification checker
+    await bot.start_notification_checker()
+
     print('Bot is starting...')
     if os.getenv('ENVIRONMENT') == 'production':
         port = int(os.getenv('PORT', 8080))
         webhook_url = os.getenv('WEBHOOK_URL')
-        application.run_webhook(listen="0.0.0.0", port=port, webhook_url=webhook_url)
+        await application.run_webhook(listen="0.0.0.0", port=port, webhook_url=webhook_url)
     else:
-        application.run_polling()
+        await application.run_polling()
 
 if __name__ == '__main__':
-    main()
+    asyncio.run(main())
