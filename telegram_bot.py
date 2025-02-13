@@ -1638,10 +1638,166 @@ class PRBotTelegram:
                 parse_mode='Markdown'
             )
 
+    async def show_token_status(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Show user's token status and details"""
+        user_id = str(update.effective_user.id)
+        
+        # Check trial token
+        trial_status = "No trial token"
+        if user_id in self.user_trials:
+            trial = self.user_trials[user_id]
+            time_left = 86400 - (time.time() - trial['timestamp'])  # 24 hours in seconds
+            if time_left > 0:
+                hours_left = int(time_left / 3600)
+                trial_status = f"Active - {trial['uses_remaining']} uses left ({hours_left}h remaining)"
+            else:
+                trial_status = "Expired"
+
+        # Check purchased tokens
+        active_tokens = []
+        if user_id in self.users:
+            for token in self.users[user_id]['tokens']:
+                if token in self.tokens['active']:
+                    token_data = self.tokens['active'][token]
+                    expiry = datetime.fromtimestamp(
+                        token_data['created_at'] + token_data['duration']
+                    ).strftime('%Y-%m-%d %H:%M')
+                    active_tokens.append({
+                        'token': token,
+                        'uses': token_data['uses_remaining'],
+                        'expiry': expiry
+                    })
+
+        # Prepare status message
+        status_text = (
+            f"{self.header}"
+            "*🎫 Token Status*\n\n"
+            f"*Trial Token:*\n{trial_status}\n\n"
+        )
+
+        if active_tokens:
+            status_text += "*Active Tokens:*\n"
+            for token in active_tokens:
+                status_text += (
+                    f"• Token: `{token['token'][:10]}...`\n"
+                    f"  Uses: {token['uses']}\n"
+                    f"  Expires: {token['expiry']}\n"
+                    "━━━━━━━━━━\n"
+                )
+        else:
+            status_text += "*No active tokens*\n"
+
+        # Add balance if exists
+        if user_id in self.users:
+            balance = self.users[user_id].get('balance', 0)
+            status_text += f"\n*Balance:* ${balance:.2f}"
+
+        keyboard = [
+            [InlineKeyboardButton("🎁 Get Trial", callback_data='trial')] if trial_status == "No trial token" else [],
+            [InlineKeyboardButton("💰 Buy Token", callback_data='purchase')],
+            [InlineKeyboardButton("📖 How to Use", callback_data='show_instructions')],
+            [InlineKeyboardButton("🔙 Main Menu", callback_data='back_main')]
+        ]
+
+        try:
+            await update.message.reply_text(
+                status_text,
+                reply_markup=InlineKeyboardMarkup([k for k in keyboard if k]),  # Remove empty lists
+                parse_mode='Markdown'
+            )
+        except Exception as e:
+            self.logger.error(f"Status display error: {str(e)}")
+            # Fallback simple status
+            await update.message.reply_text(
+                f"{self.header}"
+                "❌ *Error Displaying Status*\n\n"
+                "Please try again or contact support.",
+                parse_mode='Markdown'
+            )
+
+    def get_user_preferences(self, user_id: str) -> dict:
+        """Get user preferences for text processing"""
+        if not hasattr(self, 'user_preferences'):
+            self.user_preferences = {}
+            
+        if user_id not in self.user_preferences:
+            # Default preferences
+            self.user_preferences[user_id] = {
+                'style': 'basic',
+                'variations': 1,
+                'format': 'markdown'
+            }
+            
+        return self.user_preferences[user_id]
+
+    def save_data(self):
+        """Save all bot data"""
+        try:
+            # Save tokens
+            with open('tokens.json', 'w') as f:
+                json.dump(self.tokens, f)
+            
+            # Save users
+            with open('users.json', 'w') as f:
+                json.dump(self.users, f)
+            
+            # Save trials
+            with open('trials.json', 'w') as f:
+                json.dump(self.user_trials, f)
+            
+            # Save preferences
+            with open('preferences.json', 'w') as f:
+                json.dump(getattr(self, 'user_preferences', {}), f)
+                
+        except Exception as e:
+            self.logger.error(f"Data save error: {str(e)}")
+
+    def load_data(self):
+        """Load all bot data"""
+        try:
+            # Load tokens
+            if os.path.exists('tokens.json'):
+                with open('tokens.json', 'r') as f:
+                    self.tokens = json.load(f)
+            else:
+                self.tokens = {'active': {}, 'expired': {}}
+            
+            # Load users
+            if os.path.exists('users.json'):
+                with open('users.json', 'r') as f:
+                    self.users = json.load(f)
+            else:
+                self.users = {}
+            
+            # Load trials
+            if os.path.exists('trials.json'):
+                with open('trials.json', 'r') as f:
+                    self.user_trials = json.load(f)
+            else:
+                self.user_trials = {}
+            
+            # Load preferences
+            if os.path.exists('preferences.json'):
+                with open('preferences.json', 'r') as f:
+                    self.user_preferences = json.load(f)
+            else:
+                self.user_preferences = {}
+                
+        except Exception as e:
+            self.logger.error(f"Data load error: {str(e)}")
+            # Initialize with empty data if load fails
+            self.tokens = {'active': {}, 'expired': {}}
+            self.users = {}
+            self.user_trials = {}
+            self.user_preferences = {}
+
 def main():
     """Start the bot"""
     application = Application.builder().token(TELEGRAM_TOKEN).build()
     bot = PRBotTelegram()
+    
+    # Start notification checker
+    bot.start_notification_checker()
 
     # Add handlers
     application.add_handler(CommandHandler("start", bot.start))
