@@ -1792,29 +1792,9 @@ class PRBotTelegram:
             self.user_trials = {}
             self.user_preferences = {}
 
-    async def start_notification_checker(self):
+    async def start_notification_checker(self, application: Application):
         """Start the notification checker"""
-        try:
-            if self.notification_task is None:
-                self.notification_task = asyncio.create_task(self.check_and_notify())
-                self.logger.info("Notification checker started")
-        except Exception as e:
-            self.logger.error(f"Failed to start notification checker: {str(e)}")
-
-    async def stop_notification_checker(self):
-        """Stop the notification checker"""
-        if self.notification_task:
-            self.notification_task.cancel()
-            try:
-                await self.notification_task
-            except asyncio.CancelledError:
-                pass
-            self.notification_task = None
-            self.logger.info("Notification checker stopped")
-
-    async def check_and_notify(self):
-        """Periodic check for notifications"""
-        while True:
+        async def notification_job(context: ContextTypes.DEFAULT_TYPE):
             try:
                 current_time = time.time()
                 
@@ -1844,17 +1824,67 @@ class PRBotTelegram:
                                     token=token
                                 )
                 
-                # Sleep for 6 hours before next check
-                await asyncio.sleep(21600)
-                
-            except asyncio.CancelledError:
-                break
             except Exception as e:
-                self.logger.error(f"Notification check error: {str(e)}")
-                await asyncio.sleep(300)  # Wait 5 minutes on error
+                self.logger.error(f"Notification job error: {str(e)}")
 
-async def main():
+        # Add job to application's job queue
+        job_queue = application.job_queue
+        job_queue.run_repeating(notification_job, interval=21600, first=10)  # Run every 6 hours
+        self.logger.info("Notification checker started")
+
+    async def send_notification(self, user_id: str, notification_type: str, **kwargs):
+        """Send notifications to users"""
+        try:
+            if notification_type == 'token_expiring':
+                days_left = kwargs.get('days_left', 0)
+                token = kwargs.get('token', '')
+                message = (
+                    f"{self.header}"
+                    "⚠️ *Token Expiring Soon*\n\n"
+                    f"Your token `{token[:10]}...` will expire in {days_left} days.\n\n"
+                    "*Actions:*\n"
+                    "• Purchase new token\n"
+                    "• Check remaining uses\n"
+                    "• Transfer remaining balance"
+                )
+                keyboard = [
+                    [InlineKeyboardButton("💰 Buy New Token", callback_data='purchase')],
+                    [InlineKeyboardButton("📊 Check Status", callback_data='check_status')]
+                ]
+
+            elif notification_type == 'low_uses':
+                uses_left = kwargs.get('uses_left', 0)
+                token = kwargs.get('token', '')
+                message = (
+                    f"{self.header}"
+                    "⚠️ *Low Token Uses*\n\n"
+                    f"Your token `{token[:10]}...` has {uses_left} uses remaining.\n\n"
+                    "*Recommended Actions:*\n"
+                    "• Purchase new token\n"
+                    "• Check current balance\n"
+                    "• View available plans"
+                )
+                keyboard = [
+                    [InlineKeyboardButton("💰 Buy New Token", callback_data='purchase')],
+                    [InlineKeyboardButton("📊 Check Balance", callback_data='check_balance')]
+                ]
+
+            else:
+                return
+
+            await context.bot.send_message(
+                chat_id=user_id,
+                text=message,
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                parse_mode='Markdown'
+            )
+
+        except Exception as e:
+            self.logger.error(f"Notification error for {user_id}: {str(e)}")
+
+def main():
     """Start the bot"""
+    # Initialize bot and application
     application = Application.builder().token(TELEGRAM_TOKEN).build()
     bot = PRBotTelegram()
     
@@ -1865,16 +1895,16 @@ async def main():
     application.add_handler(CallbackQueryHandler(bot.handle_callback))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, bot.handle_text))
 
-    # Start notification checker
-    await bot.start_notification_checker()
+    # Start notification checker using job queue
+    bot.start_notification_checker(application)
 
     print('Bot is starting...')
     if os.getenv('ENVIRONMENT') == 'production':
         port = int(os.getenv('PORT', 8080))
         webhook_url = os.getenv('WEBHOOK_URL')
-        await application.run_webhook(listen="0.0.0.0", port=port, webhook_url=webhook_url)
+        application.run_webhook(listen="0.0.0.0", port=port, webhook_url=webhook_url)
     else:
-        await application.run_polling()
+        application.run_polling()
 
 if __name__ == '__main__':
-    asyncio.run(main())
+    main()
