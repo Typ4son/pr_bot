@@ -70,22 +70,62 @@ class PRBotTelegram:
         return token
 
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Start command handler"""
-        keyboard = [
-            [InlineKeyboardButton("🎁 Free Trial", callback_data='trial')],
-            [InlineKeyboardButton("💰 Buy Token", callback_data='purchase')],
-            [InlineKeyboardButton("👤 Profile", callback_data='profile')]
-        ]
+        """Handle /start command"""
+        user_id = str(update.effective_user.id)
         
-        if update.effective_user.id == ADMIN_USER_ID:
-            keyboard.append([InlineKeyboardButton("👑 Admin Panel", callback_data='admin')])
-
-        await update.message.reply_text(
+        welcome_message = (
             f"{self.header}"
-            "Welcome! Choose an option below:",
+            "*Welcome to TYP4SON Bot!* 🚀\n\n"
+            "*Services Available:*\n"
+            "• Unique PR Text Generation\n"
+            "• Multiple Subscription Plans\n"
+            "• Instant Processing\n\n"
+            "*Get Started:*\n"
+            "1. Choose a plan below\n"
+            "2. Start using the service\n"
+            "3. Monitor your usage"
+        )
+        
+        # Check if user has active subscription
+        has_subscription = await self.check_subscription(user_id)
+        
+        if has_subscription:
+            keyboard = [
+                [InlineKeyboardButton("📝 Start Using", callback_data='start_processing')],
+                [InlineKeyboardButton("📊 My Account", callback_data='account_status')],
+                [
+                    InlineKeyboardButton("💫 Upgrade", callback_data='upgrade_plan'),
+                    InlineKeyboardButton("❓ Help", callback_data='show_help')
+                ]
+            ]
+        else:
+            keyboard = [
+                [
+                    InlineKeyboardButton("🎁 Free Trial", callback_data='trial'),
+                    InlineKeyboardButton("💰 Buy Plan", callback_data='purchase')
+                ],
+                [
+                    InlineKeyboardButton("📖 How it Works", callback_data='show_instructions'),
+                    InlineKeyboardButton("❓ Help", callback_data='show_help')
+                ]
+            ]
+        
+        await update.message.reply_text(
+            welcome_message,
             reply_markup=InlineKeyboardMarkup(keyboard),
             parse_mode='Markdown'
         )
+
+    async def check_subscription(self, user_id: str) -> bool:
+        """Check if user has active subscription"""
+        if not hasattr(self, 'subscriptions'):
+            self.subscriptions = {}
+            
+        if user_id in self.subscriptions:
+            sub_data = self.subscriptions[user_id]
+            if sub_data['expires_at'] > time.time():
+                return True
+        return False
 
     async def handle_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle button presses"""
@@ -1306,16 +1346,21 @@ def main():
     application.add_handler(CallbackQueryHandler(bot.handle_callback))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, bot.handle_text))
 
-    # Start notification checker using job queue
+    # Start notification checker
     bot.start_notification_checker(application)
 
     print('Bot is starting...')
     if os.getenv('ENVIRONMENT') == 'production':
         port = int(os.getenv('PORT', 8080))
         webhook_url = os.getenv('WEBHOOK_URL')
-        application.run_webhook(listen="0.0.0.0", port=port, webhook_url=webhook_url)
+        application.run_webhook(
+            listen="0.0.0.0",
+            port=port,
+            webhook_url=webhook_url,
+            drop_pending_updates=True
+        )
     else:
-        application.run_polling()
+        application.run_polling(drop_pending_updates=True)
 
 if __name__ == '__main__':
     main()
