@@ -1,5 +1,5 @@
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes, MessageHandler, filters
 import os, json, time, hashlib
 from dotenv import load_dotenv
 import logging
@@ -16,8 +16,9 @@ class PRBotTelegram:
         self.user_trials = {}
         self.tokens = self.load_tokens()
         self.users = self.load_users()
+        self.payments = {}
         self.header = (
-            "🤖 *TYP4SON BOT*\n"
+            "🤖 *TYP4SON PR BOT*\n"
             "━━━━━━━━━━━━━━━\n\n"
         )
 
@@ -364,13 +365,267 @@ class PRBotTelegram:
             parse_mode='Markdown'
         )
 
+    async def show_tokens_list(self, query):
+        """Show active tokens list"""
+        tokens_text = (
+            f"{self.header}"
+            "*🎫 Token Management*\n\n"
+        )
+        
+        active_tokens = self.tokens.get('active', {})
+        if not active_tokens:
+            tokens_text += "No active tokens found."
+        else:
+            for token, data in list(active_tokens.items())[:5]:
+                expiry = datetime.fromtimestamp(data['created_at'] + data['duration'])
+                tokens_text += f"Token: `{token[:15]}...`\n"
+                tokens_text += f"Uses Left: {data['uses_remaining']}\n"
+                tokens_text += f"Expires: {expiry.strftime('%Y-%m-%d %H:%M')}\n"
+                tokens_text += "━━━━━━━━━━\n"
+
+        keyboard = [
+            [InlineKeyboardButton("🆕 Generate Token", callback_data='admin_generate')],
+            [InlineKeyboardButton("🔙 Back to Admin", callback_data='admin')]
+        ]
+        
+        await query.edit_message_text(
+            tokens_text,
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode='Markdown'
+        )
+
+    async def show_stats(self, query):
+        """Show system statistics"""
+        total_users = len(self.users)
+        total_active_tokens = len(self.tokens.get('active', {}))
+        total_expired_tokens = len(self.tokens.get('expired', {}))
+        total_trials = len(self.user_trials)
+        
+        stats_text = (
+            f"{self.header}"
+            "*📊 System Statistics*\n\n"
+            f"👥 Total Users: {total_users}\n"
+            f"🎫 Active Tokens: {total_active_tokens}\n"
+            f"📅 Expired Tokens: {total_expired_tokens}\n"
+            f"🎁 Trial Users: {total_trials}\n"
+            "━━━━━━━━━━\n\n"
+            "*Recent Activity:*\n"
+        )
+        
+        # Add recent activity
+        recent_tokens = sorted(
+            self.tokens.get('active', {}).items(),
+            key=lambda x: x[1]['created_at'],
+            reverse=True
+        )[:3]
+        
+        for token, data in recent_tokens:
+            created = datetime.fromtimestamp(data['created_at'])
+            stats_text += f"Token Created: {created.strftime('%Y-%m-%d %H:%M')}\n"
+        
+        keyboard = [[InlineKeyboardButton("🔙 Back to Admin", callback_data='admin')]]
+        
+        await query.edit_message_text(
+            stats_text,
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode='Markdown'
+        )
+
+    async def handle_pr(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle PR submission and processing"""
+        message = update.message
+        user_id = str(message.from_user.id)
+        
+        # Check if message contains PR URL
+        text = message.text.strip()
+        if not text.startswith(('http://github.com/', 'https://github.com/')):
+            await message.reply_text(
+                f"{self.header}"
+                "❌ *Invalid PR URL*\n\n"
+                "Please send a valid GitHub PR URL.",
+                parse_mode='Markdown'
+            )
+            return
+        
+        # Validate token
+        valid_token = await self.validate_user_token(user_id)
+        if not valid_token:
+            await message.reply_text(
+                f"{self.header}"
+                "❌ *No Valid Token Found*\n\n"
+                "Please purchase a token or get a trial:",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("🎁 Free Trial", callback_data='trial')],
+                    [InlineKeyboardButton("💰 Buy Token", callback_data='purchase')]
+                ]),
+                parse_mode='Markdown'
+            )
+            return
+        
+        # Process PR
+        try:
+            await message.reply_text(
+                f"{self.header}"
+                "🔄 *Processing PR*\n\n"
+                "Please wait...",
+                parse_mode='Markdown'
+            )
+            
+            # Your PR processing logic here
+            pr_result = await self.process_pr(text)
+            
+            if pr_result['success']:
+                # Update token usage
+                await self.update_token_usage(valid_token, user_id)
+                
+                await message.reply_text(
+                    f"{self.header}"
+                    "✅ *PR Processed Successfully*\n\n"
+                    f"Status: {pr_result['status']}\n"
+                    f"Uses remaining: {pr_result['uses_remaining']}",
+                    parse_mode='Markdown'
+                )
+            else:
+                await message.reply_text(
+                    f"{self.header}"
+                    "❌ *PR Processing Failed*\n\n"
+                    f"Error: {pr_result['error']}",
+                    parse_mode='Markdown'
+                )
+                
+        except Exception as e:
+            self.logger.error(f"PR processing error: {str(e)}")
+            await message.reply_text(
+                f"{self.header}"
+                "❌ *Error Processing PR*\n\n"
+                "Please try again later.",
+                parse_mode='Markdown'
+            )
+
+    async def handle_payment(self, query, payment_method: str):
+        """Handle payment processing"""
+        user_id = str(query.from_user.id)
+        payment_data = query.data.split('_')  # payment_crypto_btc_amount
+        amount = float(payment_data[3])
+        
+        payment_info = {
+            'crypto': {
+                'btc': {'address': 'your_btc_address', 'network': 'Bitcoin'},
+                'eth': {'address': 'your_eth_address', 'network': 'Ethereum'},
+                'usdt': {'address': 'your_usdt_address', 'network': 'TRC20'}
+            }
+        }
+        
+        if payment_method == 'crypto':
+            crypto = payment_data[2]
+            if crypto in payment_info['crypto']:
+                crypto_data = payment_info['crypto'][crypto]
+                
+                message = (
+                    f"{self.header}"
+                    "*💰 Crypto Payment*\n\n"
+                    f"Amount: ${amount}\n"
+                    f"Currency: {crypto.upper()}\n"
+                    f"Network: {crypto_data['network']}\n\n"
+                    "*Payment Address:*\n"
+                    f"`{crypto_data['address']}`\n\n"
+                    "Send the exact amount to this address.\n"
+                    "_Payment will be confirmed automatically._"
+                )
+                
+                keyboard = [
+                    [InlineKeyboardButton("✅ I've Paid", callback_data=f'verify_{crypto}_{amount}')],
+                    [InlineKeyboardButton("🔙 Back", callback_data='purchase')]
+                ]
+                
+                await query.edit_message_text(
+                    message,
+                    reply_markup=InlineKeyboardMarkup(keyboard),
+                    parse_mode='Markdown'
+                )
+                
+                # Create payment record
+                payment_id = f"PAY-{user_id}-{int(time.time())}"
+                self.payments[payment_id] = {
+                    'user_id': user_id,
+                    'amount': amount,
+                    'method': 'crypto',
+                    'currency': crypto,
+                    'status': 'pending',
+                    'created_at': int(time.time())
+                }
+                self.save_data()
+
+    async def verify_payment(self, query, payment_id: str):
+        """Verify payment status"""
+        payment = self.payments.get(payment_id)
+        if not payment:
+            await query.edit_message_text(
+                f"{self.header}"
+                "❌ *Payment Not Found*\n\n"
+                "Please try again or contact support.",
+                parse_mode='Markdown'
+            )
+            return
+        
+        try:
+            # Implement your payment verification logic here
+            # For example, check blockchain for crypto payments
+            payment_verified = True  # Replace with actual verification
+            
+            if payment_verified:
+                user_id = payment['user_id']
+                amount = payment['amount']
+                
+                # Update user balance
+                if user_id not in self.users:
+                    self.users[user_id] = {'balance': 0, 'tokens': []}
+                self.users[user_id]['balance'] += amount
+                
+                # Update payment status
+                payment['status'] = 'completed'
+                self.save_data()
+                
+                await query.edit_message_text(
+                    f"{self.header}"
+                    "✅ *Payment Confirmed*\n\n"
+                    f"Amount: ${amount}\n"
+                    f"New Balance: ${self.users[user_id]['balance']:.2f}",
+                    reply_markup=InlineKeyboardMarkup([
+                        [InlineKeyboardButton("🎫 Buy Token", callback_data='purchase')],
+                        [InlineKeyboardButton("🔙 Main Menu", callback_data='back_main')]
+                    ]),
+                    parse_mode='Markdown'
+                )
+            else:
+                await query.edit_message_text(
+                    f"{self.header}"
+                    "⏳ *Payment Pending*\n\n"
+                    "Please wait for confirmation...",
+                    reply_markup=InlineKeyboardMarkup([
+                        [InlineKeyboardButton("🔄 Check Again", callback_data=f'verify_{payment_id}')]
+                    ]),
+                    parse_mode='Markdown'
+                )
+                
+        except Exception as e:
+            self.logger.error(f"Payment verification error: {str(e)}")
+            await query.edit_message_text(
+                f"{self.header}"
+                "❌ *Verification Error*\n\n"
+                "Please try again later or contact support.",
+                parse_mode='Markdown'
+            )
+
 def main():
     """Start the bot"""
     application = Application.builder().token(TELEGRAM_TOKEN).build()
     bot = PRBotTelegram()
 
+    # Add handlers
     application.add_handler(CommandHandler("start", bot.start))
     application.add_handler(CallbackQueryHandler(bot.handle_callback))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, bot.handle_pr))
 
     print('Bot is starting...')
     if os.getenv('ENVIRONMENT') == 'production':
