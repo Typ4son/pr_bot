@@ -36,13 +36,30 @@ class PRBotTelegram:
             return {}
 
     def save_data(self):
-        with open('tokens.json', 'w') as f:
-            json.dump(self.tokens, f, indent=2)
-        with open('users.json', 'w') as f:
-            json.dump(self.users, f, indent=2)
+        try:
+            with open('tokens.json', 'w') as f:
+                json.dump(self.tokens, f, indent=2)
+            with open('users.json', 'w') as f:
+                json.dump(self.users, f, indent=2)
+        except Exception as e:
+            self.logger.error(f"Error saving data: {str(e)}")
+
+    def generate_token(self, duration: int, uses: int) -> str:
+        timestamp = int(time.time())
+        token_base = f"PR-{timestamp}-{duration}-{uses}"
+        token_hash = hashlib.sha256(token_base.encode()).hexdigest()[:8]
+        token = f"{token_base}-{token_hash}"
+        
+        self.tokens['active'][token] = {
+            'created_at': timestamp,
+            'duration': duration,
+            'uses_remaining': uses
+        }
+        self.save_data()
+        return token
 
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Simple start menu"""
+        """Start command handler"""
         keyboard = [
             [InlineKeyboardButton("🎁 Free Trial", callback_data='trial')],
             [InlineKeyboardButton("💰 Buy Token", callback_data='purchase')],
@@ -55,6 +72,102 @@ class PRBotTelegram:
         await update.message.reply_text(
             f"{self.header}"
             "Welcome! Choose an option below:",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode='Markdown'
+        )
+
+    async def handle_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle button presses"""
+        query = update.callback_query
+        data = query.data
+        
+        try:
+            await query.answer()
+            
+            if data == 'profile':
+                await self.show_profile(query)
+            elif data == 'admin':
+                if query.from_user.id == ADMIN_USER_ID:
+                    await self.handle_admin(query)
+                else:
+                    await query.edit_message_text(
+                        f"{self.header}❌ Unauthorized access!",
+                        parse_mode='Markdown'
+                    )
+            elif data == 'trial':
+                await self.handle_trial(query)
+            elif data == 'purchase':
+                await self.show_purchase_options(query)
+            elif data.startswith('buy_'):
+                plan = data.split('_')[1]
+                await self.handle_purchase(query, plan)
+            elif data == 'back_main':
+                await self.show_main_menu(query)
+            elif data.startswith('admin_'):
+                if query.from_user.id == ADMIN_USER_ID:
+                    action = data.split('_')[1]
+                    await self.handle_admin_action(query, action)
+
+        except Exception as e:
+            self.logger.error(f"Callback error: {str(e)}")
+            await query.edit_message_text(
+                f"{self.header}❌ An error occurred.\nPlease try /start again.",
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("🔄 Start Over", callback_data='back_main')
+                ]]),
+                parse_mode='Markdown'
+            )
+
+    async def show_main_menu(self, query):
+        """Show main menu"""
+        keyboard = [
+            [InlineKeyboardButton("🎁 Free Trial", callback_data='trial')],
+            [InlineKeyboardButton("💰 Buy Token", callback_data='purchase')],
+            [InlineKeyboardButton("👤 Profile", callback_data='profile')]
+        ]
+        
+        if query.from_user.id == ADMIN_USER_ID:
+            keyboard.append([InlineKeyboardButton("👑 Admin Panel", callback_data='admin')])
+
+        await query.edit_message_text(
+            f"{self.header}"
+            "Choose an option below:",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode='Markdown'
+        )
+
+    async def handle_admin_action(self, query, action):
+        """Handle admin panel actions"""
+        if action == 'users':
+            await self.show_users_list(query)
+        elif action == 'tokens':
+            await self.show_tokens_list(query)
+        elif action == 'stats':
+            await self.show_stats(query)
+        elif action == 'settings':
+            await self.show_settings(query)
+
+    async def show_users_list(self, query):
+        """Show users list with pagination"""
+        users_text = (
+            f"{self.header}"
+            "*👥 User Management*\n\n"
+        )
+        
+        if not self.users:
+            users_text += "No users found."
+        else:
+            for user_id, data in list(self.users.items())[:5]:  # Show first 5 users
+                users_text += f"ID: `{user_id}`\n"
+                users_text += f"Balance: ${data.get('balance', 0):.2f}\n"
+                users_text += "━━━━━━━━━━\n"
+
+        keyboard = [
+            [InlineKeyboardButton("🔙 Back to Admin", callback_data='admin')]
+        ]
+        
+        await query.edit_message_text(
+            users_text,
             reply_markup=InlineKeyboardMarkup(keyboard),
             parse_mode='Markdown'
         )
@@ -105,88 +218,6 @@ class PRBotTelegram:
             reply_markup=InlineKeyboardMarkup(keyboard),
             parse_mode='Markdown'
         )
-
-    async def handle_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle button presses"""
-        query = update.callback_query
-        data = query.data
-        
-        try:
-            await query.answer()
-            
-            if data == 'profile':
-                await self.show_profile(query)
-            elif data == 'admin':
-                if query.from_user.id == ADMIN_USER_ID:
-                    await self.handle_admin(query)
-                else:
-                    await query.edit_message_text("Unauthorized access!")
-            elif data.startswith('admin_'):
-                if query.from_user.id == ADMIN_USER_ID:
-                    action = data.split('_')[1]
-                    await self.handle_admin_action(query, action)
-            elif data == 'back_main':
-                keyboard = [
-                    [InlineKeyboardButton("🎁 Free Trial", callback_data='trial')],
-                    [InlineKeyboardButton("💰 Buy Token", callback_data='purchase')],
-                    [InlineKeyboardButton("👤 Profile", callback_data='profile')]
-                ]
-                
-                if query.from_user.id == ADMIN_USER_ID:
-                    keyboard.append([InlineKeyboardButton("👑 Admin Panel", callback_data='admin')])
-                
-                await query.edit_message_text(
-                    f"{self.header}"
-                    "Welcome! Choose an option below:",
-                    reply_markup=InlineKeyboardMarkup(keyboard),
-                    parse_mode='Markdown'
-                )
-            elif data == 'trial':
-                await self.handle_trial(query)
-            elif data == 'purchase':
-                await self.show_purchase_options(query)
-
-        except Exception as e:
-            self.logger.error(f"Callback error: {str(e)}")
-            await query.edit_message_text(
-                f"{self.header}"
-                "An error occurred. Please try /start again.",
-                reply_markup=InlineKeyboardMarkup([[
-                    InlineKeyboardButton("🔄 Start Over", callback_data='back_main')
-                ]])
-            )
-
-    async def handle_admin_action(self, query, action):
-        """Handle admin panel actions"""
-        if action == 'users':
-            page = 0
-            users_per_page = 5
-            all_users = list(self.users.items())
-            total_pages = (len(all_users) + users_per_page - 1) // users_per_page
-            
-            users_text = f"{self.header}👥 User Management*\n\n"
-            start_idx = page * users_per_page
-            end_idx = min(start_idx + users_per_page, len(all_users))
-            
-            for user_id, data in all_users[start_idx:end_idx]:
-                users_text += f"ID: `{user_id}`\n"
-                users_text += f"Balance: ${data.get('balance', 0):.2f}\n"
-                users_text += "━━━━━━━━━━\n"
-            
-            keyboard = [
-                [
-                    InlineKeyboardButton("⬅️ Prev", callback_data='admin_users_prev'),
-                    InlineKeyboardButton(f"{page + 1}/{total_pages}", callback_data='page_info'),
-                    InlineKeyboardButton("➡️ Next", callback_data='admin_users_next')
-                ],
-                [InlineKeyboardButton("🔙 Back to Admin", callback_data='admin')]
-            ]
-            
-            await query.edit_message_text(
-                users_text,
-                reply_markup=InlineKeyboardMarkup(keyboard),
-                parse_mode='Markdown'
-            )
 
     async def handle_trial(self, query):
         """Handle free trial token generation"""
@@ -334,6 +365,7 @@ class PRBotTelegram:
         )
 
 def main():
+    """Start the bot"""
     application = Application.builder().token(TELEGRAM_TOKEN).build()
     bot = PRBotTelegram()
 
