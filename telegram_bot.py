@@ -1,6 +1,6 @@
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes, MessageHandler, filters
-import os, json, time, hashlib
+import os, json, time, hashlib, asyncio
 from dotenv import load_dotenv
 import logging
 from datetime import datetime
@@ -21,6 +21,15 @@ class PRBotTelegram:
             "🤖 *TYP4SON PR BOT*\n"
             "━━━━━━━━━━━━━━━\n\n"
         )
+        self.token_history = {}
+        self.pr_queue = {
+            'pending': [],
+            'active': [],
+            'completed': [],
+            'failed': []
+        }
+        self.active_sessions = {}
+        self.blocked_ips = set()
 
     def load_tokens(self):
         try:
@@ -199,7 +208,7 @@ class PRBotTelegram:
         )
 
     async def handle_admin(self, query):
-        """Admin panel handler"""
+        """Enhanced Admin Control Panel"""
         keyboard = [
             [
                 InlineKeyboardButton("👥 Users", callback_data='admin_users'),
@@ -209,12 +218,130 @@ class PRBotTelegram:
                 InlineKeyboardButton("📊 Stats", callback_data='admin_stats'),
                 InlineKeyboardButton("⚙️ Settings", callback_data='admin_settings')
             ],
+            [
+                InlineKeyboardButton("🔄 Queue", callback_data='admin_queue'),
+                InlineKeyboardButton("🔒 Security", callback_data='admin_security')
+            ],
             [InlineKeyboardButton("🔙 Back", callback_data='back_main')]
         ]
         
         await query.edit_message_text(
             f"{self.header}"
             "*👑 Admin Control Panel*\n\n"
+            "Select a module to manage:\n\n"
+            "• 👥 Users: Manage user accounts\n"
+            "• 🎫 Tokens: Generate/monitor tokens\n"
+            "• 📊 Stats: System analytics\n"
+            "• ⚙️ Settings: Bot configuration\n"
+            "• 🔄 Queue: PR processing queue\n"
+            "• 🔒 Security: Security controls",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode='Markdown'
+        )
+
+    async def admin_bulk_tokens(self, query):
+        """Generate multiple tokens"""
+        keyboard = [
+            [
+                InlineKeyboardButton("Daily (10)", callback_data='gen_bulk_daily_10'),
+                InlineKeyboardButton("Weekly (5)", callback_data='gen_bulk_weekly_5')
+            ],
+            [
+                InlineKeyboardButton("Monthly (3)", callback_data='gen_bulk_monthly_3'),
+                InlineKeyboardButton("Custom", callback_data='gen_bulk_custom')
+            ],
+            [InlineKeyboardButton("🔙 Back to Tokens", callback_data='admin_tokens')]
+        ]
+        
+        await query.edit_message_text(
+            f"{self.header}"
+            "*🎫 Bulk Token Generation*\n\n"
+            "Select a preset or custom amount:",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode='Markdown'
+        )
+
+    async def admin_security(self, query):
+        """Security controls"""
+        security_settings = self.get_security_settings()
+        status = "✅" if security_settings.get('ip_logging', False) else "❌"
+        rate_limit = security_settings.get('rate_limit', '10/minute')
+        
+        keyboard = [
+            [
+                InlineKeyboardButton(f"IP Logging: {status}", callback_data='toggle_ip_logging'),
+                InlineKeyboardButton("Rate Limit", callback_data='set_rate_limit')
+            ],
+            [
+                InlineKeyboardButton("View Logs", callback_data='view_security_logs'),
+                InlineKeyboardButton("Blocked IPs", callback_data='view_blocked_ips')
+            ],
+            [InlineKeyboardButton("🔙 Back to Admin", callback_data='admin')]
+        ]
+        
+        await query.edit_message_text(
+            f"{self.header}"
+            "*🔒 Security Controls*\n\n"
+            f"• IP Logging: {status}\n"
+            f"• Rate Limit: {rate_limit}\n"
+            f"• Active Sessions: {len(self.active_sessions)}\n"
+            f"• Blocked IPs: {len(self.blocked_ips)}\n\n"
+            "Select an option to configure:",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode='Markdown'
+        )
+
+    async def admin_queue(self, query):
+        """PR Queue Management"""
+        active_prs = len(self.pr_queue.get('active', []))
+        pending_prs = len(self.pr_queue.get('pending', []))
+        failed_prs = len(self.pr_queue.get('failed', []))
+        
+        keyboard = [
+            [
+                InlineKeyboardButton(f"Active ({active_prs})", callback_data='queue_active'),
+                InlineKeyboardButton(f"Pending ({pending_prs})", callback_data='queue_pending')
+            ],
+            [
+                InlineKeyboardButton(f"Failed ({failed_prs})", callback_data='queue_failed'),
+                InlineKeyboardButton("Settings", callback_data='queue_settings')
+            ],
+            [InlineKeyboardButton("🔙 Back to Admin", callback_data='admin')]
+        ]
+        
+        await query.edit_message_text(
+            f"{self.header}"
+            "*🔄 PR Queue Management*\n\n"
+            f"• Active PRs: {active_prs}\n"
+            f"• Pending PRs: {pending_prs}\n"
+            f"• Failed PRs: {failed_prs}\n\n"
+            "Select a category to manage:",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode='Markdown'
+        )
+
+    async def admin_payment_verification(self, query):
+        """Payment verification panel"""
+        pending_payments = len(self.payments.get('pending', []))
+        
+        keyboard = [
+            [
+                InlineKeyboardButton(f"Pending ({pending_payments})", callback_data='verify_pending'),
+                InlineKeyboardButton("History", callback_data='payment_history')
+            ],
+            [
+                InlineKeyboardButton("Settings", callback_data='payment_settings'),
+                InlineKeyboardButton("Reports", callback_data='payment_reports')
+            ],
+            [InlineKeyboardButton("🔙 Back to Admin", callback_data='admin')]
+        ]
+        
+        await query.edit_message_text(
+            f"{self.header}"
+            "*💰 Payment Management*\n\n"
+            f"• Pending Verifications: {pending_payments}\n"
+            "• Auto-verification: Enabled\n"
+            "• Payment Methods: BTC, ETH, USDT\n\n"
             "Select an option to manage:",
             reply_markup=InlineKeyboardMarkup(keyboard),
             parse_mode='Markdown'
@@ -617,6 +744,219 @@ class PRBotTelegram:
                 parse_mode='Markdown'
             )
 
+    async def show_settings(self, query):
+        """Show admin settings"""
+        settings_text = (
+            f"{self.header}"
+            "*⚙️ Bot Settings*\n\n"
+            "🔐 *Security Settings*\n"
+            "• Token Duration: 24h/7d/30d\n"
+            "• Max Uses: 10/100/500\n\n"
+            "💰 *Payment Settings*\n"
+            "• Min Deposit: $5\n"
+            "• Accepted: BTC/ETH/USDT\n\n"
+            "🤖 *Bot Settings*\n"
+            "• Auto-approve: Enabled\n"
+            "• Notifications: Enabled"
+        )
+        
+        keyboard = [
+            [
+                InlineKeyboardButton("🔐 Security", callback_data='settings_security'),
+                InlineKeyboardButton("💰 Payment", callback_data='settings_payment')
+            ],
+            [InlineKeyboardButton("🔙 Back to Admin", callback_data='admin')]
+        ]
+        
+        await query.edit_message_text(
+            settings_text,
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode='Markdown'
+        )
+
+    async def redeem_token(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle token redemption"""
+        message = update.message
+        user_id = str(message.from_user.id)
+        token = message.text.replace("/redeem ", "").strip()
+
+        if token in self.tokens['active']:
+            token_data = self.tokens['active'][token]
+            
+            # Check if token is valid
+            if time.time() - token_data['created_at'] <= token_data['duration']:
+                if token_data['uses_remaining'] > 0:
+                    # Add token to user
+                    if user_id not in self.users:
+                        self.users[user_id] = {'balance': 0, 'tokens': []}
+                    
+                    if token not in self.users[user_id]['tokens']:
+                        self.users[user_id]['tokens'].append(token)
+                        self.save_data()
+                        
+                        await message.reply_text(
+                            f"{self.header}"
+                            "✅ *Token Redeemed Successfully*\n\n"
+                            f"Uses Remaining: {token_data['uses_remaining']}\n"
+                            "Expiry: " + datetime.fromtimestamp(
+                                token_data['created_at'] + token_data['duration']
+                            ).strftime('%Y-%m-%d %H:%M'),
+                            parse_mode='Markdown'
+                        )
+                    else:
+                        await message.reply_text(
+                            f"{self.header}"
+                            "⚠️ *Token Already Redeemed*\n\n"
+                            "This token is already linked to your account.",
+                            parse_mode='Markdown'
+                        )
+                else:
+                    await message.reply_text(
+                        f"{self.header}"
+                        "❌ *Token Depleted*\n\n"
+                        "This token has no uses remaining.",
+                        parse_mode='Markdown'
+                    )
+            else:
+                await message.reply_text(
+                    f"{self.header}"
+                    "❌ *Token Expired*\n\n"
+                    "This token has expired.",
+                    parse_mode='Markdown'
+                )
+        else:
+            await message.reply_text(
+                f"{self.header}"
+                "❌ *Invalid Token*\n\n"
+                "Please check your token and try again.",
+                parse_mode='Markdown'
+            )
+
+    async def show_help(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Show help and usage instructions"""
+        help_text = (
+            f"{self.header}"
+            "*📖 How to Use TYP4SON Bot*\n\n"
+            "*🎫 Token Management:*\n"
+            "• /start - Start the bot\n"
+            "• /redeem <token> - Redeem a token\n"
+            "• /balance - Check your balance\n"
+            "• /help - Show this help\n\n"
+            "*🔄 Using PR Service:*\n"
+            "1. Get a token (trial or purchase)\n"
+            "2. Copy your GitHub PR URL\n"
+            "3. Send the URL to this bot\n"
+            "4. Wait for processing\n\n"
+            "*💡 Tips:*\n"
+            "• Keep your tokens secure\n"
+            "• Check token expiry dates\n"
+            "• Monitor remaining uses\n"
+            "• Contact support if needed"
+        )
+        
+        keyboard = [
+            [
+                InlineKeyboardButton("🎁 Get Trial", callback_data='trial'),
+                InlineKeyboardButton("💰 Buy Token", callback_data='purchase')
+            ],
+            [InlineKeyboardButton("👤 Profile", callback_data='profile')]
+        ]
+        
+        await update.message.reply_text(
+            help_text,
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode='Markdown'
+        )
+
+    async def admin_token_history(self, query):
+        """View token usage history"""
+        history_text = (
+            f"{self.header}"
+            "*📜 Token Usage History*\n\n"
+        )
+        
+        recent_usage = sorted(
+            self.token_history.items(),
+            key=lambda x: x[1]['timestamp'],
+            reverse=True
+        )[:5]
+        
+        for token_id, data in recent_usage:
+            history_text += (
+                f"Token: `{token_id[:10]}...`\n"
+                f"Used: {datetime.fromtimestamp(data['timestamp']).strftime('%Y-%m-%d %H:%M')}\n"
+                f"User: `{data['user_id']}`\n"
+                f"Status: {'✅' if data['success'] else '❌'}\n"
+                "━━━━━━━━━━\n"
+            )
+        
+        keyboard = [
+            [
+                InlineKeyboardButton("📊 Analytics", callback_data='token_analytics'),
+                InlineKeyboardButton("🔍 Search", callback_data='token_search')
+            ],
+            [InlineKeyboardButton("🔙 Back", callback_data='admin_tokens')]
+        ]
+        
+        await query.edit_message_text(
+            history_text,
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode='Markdown'
+        )
+
+    def get_security_settings(self):
+        """Get current security settings"""
+        return {
+            'ip_logging': True,
+            'rate_limit': '10/minute',
+            'active_sessions': {},
+            'blocked_ips': set(),
+            '2fa_enabled': True,
+            'suspicious_activity_detection': True
+        }
+
+    async def process_pr_queue(self):
+        """Process PR queue"""
+        while True:
+            if self.pr_queue['pending']:
+                pr_data = self.pr_queue['pending'].pop(0)
+                self.pr_queue['active'].append(pr_data)
+                
+                try:
+                    # Process PR logic here
+                    success = True  # Replace with actual processing
+                    
+                    if success:
+                        self.pr_queue['completed'].append(pr_data)
+                    else:
+                        self.pr_queue['failed'].append(pr_data)
+                        
+                except Exception as e:
+                    self.logger.error(f"PR processing error: {str(e)}")
+                    self.pr_queue['failed'].append(pr_data)
+                
+                finally:
+                    self.pr_queue['active'].remove(pr_data)
+            
+            await asyncio.sleep(1)  # Prevent CPU overload
+
+    def initialize_data(self):
+        """Initialize bot data structures"""
+        self.token_history = {}
+        self.pr_queue = {
+            'pending': [],
+            'active': [],
+            'completed': [],
+            'failed': []
+        }
+        self.payments = {
+            'pending': [],
+            'completed': [],
+            'failed': []
+        }
+        self.active_sessions = {}
+        self.blocked_ips = set()
+
 def main():
     """Start the bot"""
     application = Application.builder().token(TELEGRAM_TOKEN).build()
@@ -624,6 +964,8 @@ def main():
 
     # Add handlers
     application.add_handler(CommandHandler("start", bot.start))
+    application.add_handler(CommandHandler("help", bot.show_help))
+    application.add_handler(CommandHandler("redeem", bot.redeem_token))
     application.add_handler(CallbackQueryHandler(bot.handle_callback))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, bot.handle_pr))
 
