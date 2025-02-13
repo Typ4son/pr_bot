@@ -6,6 +6,7 @@ import logging
 import json
 import time
 import hashlib
+from datetime import datetime
 
 # Add port configuration
 PORT = int(os.getenv('PORT', 8080))
@@ -77,6 +78,32 @@ class PRBotTelegram:
             'weekly': {'price': 25, 'uses': 100},
             'monthly': {'price': 80, 'uses': 500}
         }
+        self.user_trials = {}
+        self.tokens = self.load_tokens()
+        self.users = self.load_users()
+
+    def load_tokens(self):
+        """Load tokens from file"""
+        try:
+            with open('tokens.json', 'r') as f:
+                return json.load(f)
+        except FileNotFoundError:
+            return {"active": {}, "expired": {}}
+
+    def load_users(self):
+        """Load user data"""
+        try:
+            with open('users.json', 'r') as f:
+                return json.load(f)
+        except FileNotFoundError:
+            return {}
+
+    def save_data(self):
+        """Save tokens and users"""
+        with open('tokens.json', 'w') as f:
+            json.dump(self.tokens, f, indent=2)
+        with open('users.json', 'w') as f:
+            json.dump(self.users, f, indent=2)
 
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Start command handler"""
@@ -302,6 +329,8 @@ class PRBotTelegram:
                 await self.show_balance(update, context)
             elif query.data == 'purchase':
                 await self.show_purchase_options(update, context)
+            elif query.data == 'admin':
+                await self.show_admin_panel(query)
         except Exception as e:
             self.logger.error(f"Error in button_handler: {str(e)}")
             await query.answer("Sorry, something went wrong. Please try again.")
@@ -328,6 +357,91 @@ class PRBotTelegram:
         except Exception as e:
             self.logger.error(f"Error in show_balance: {str(e)}")
             await update.callback_query.answer("Error showing balance. Please try again.")
+
+    async def show_admin_panel(self, query):
+        """Admin control panel"""
+        keyboard = [
+            [
+                InlineKeyboardButton("👥 Users", callback_data='admin_users'),
+                InlineKeyboardButton("🎫 Tokens", callback_data='admin_tokens')
+            ],
+            [
+                InlineKeyboardButton("📊 Stats", callback_data='admin_stats'),
+                InlineKeyboardButton("⚙️ Settings", callback_data='admin_settings')
+            ],
+            [InlineKeyboardButton("🔙 Back", callback_data='back')]
+        ]
+        
+        await query.edit_message_text(
+            "*👑 Admin Panel*\n\n"
+            "Select an option to manage:",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode='Markdown'
+        )
+
+    async def handle_admin_callback(self, query, action):
+        """Handle admin panel actions"""
+        if action == 'users':
+            total_users = len(self.users)
+            active_users = sum(1 for u in self.users.values() if u.get('active_token'))
+            
+            stats = (
+                "*👥 User Statistics*\n\n"
+                f"Total Users: {total_users}\n"
+                f"Active Users: {active_users}\n"
+                f"Trial Users: {len(self.user_trials)}\n\n"
+                "Recent Activity:"
+            )
+            
+            # Show last 5 active users
+            recent = sorted(
+                self.users.items(), 
+                key=lambda x: x[1].get('last_active', 0),
+                reverse=True
+            )[:5]
+            
+            for user_id, data in recent:
+                last_active = datetime.fromtimestamp(data.get('last_active', 0))
+                stats += f"\nID: {user_id} - {last_active.strftime('%Y-%m-%d %H:%M')}"
+            
+            keyboard = [[InlineKeyboardButton("🔙 Back to Admin", callback_data='admin')]]
+            await query.edit_message_text(
+                stats,
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                parse_mode='Markdown'
+            )
+
+        elif action == 'tokens':
+            active_tokens = len(self.tokens['active'])
+            expired_tokens = len(self.tokens['expired'])
+            
+            stats = (
+                "*🎫 Token Statistics*\n\n"
+                f"Active Tokens: {active_tokens}\n"
+                f"Expired Tokens: {expired_tokens}\n\n"
+                "Recent Tokens:"
+            )
+            
+            # Show last 5 active tokens
+            recent = sorted(
+                self.tokens['active'].items(),
+                key=lambda x: x[1].get('created_at', 0),
+                reverse=True
+            )[:5]
+            
+            for token, data in recent:
+                created = datetime.fromtimestamp(data.get('created_at', 0))
+                stats += f"\n`{token[:15]}...`\n└ {created.strftime('%Y-%m-%d %H:%M')}"
+            
+            keyboard = [
+                [InlineKeyboardButton("🆕 Generate Token", callback_data='admin_generate')],
+                [InlineKeyboardButton("🔙 Back to Admin", callback_data='admin')]
+            ]
+            await query.edit_message_text(
+                stats,
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                parse_mode='Markdown'
+            )
 
 def main():
     """Start the bot"""
