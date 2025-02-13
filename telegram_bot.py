@@ -80,20 +80,33 @@ class PRBotTelegram:
 
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Start command handler"""
+        user = update.effective_user
         keyboard = [
+            [
+                InlineKeyboardButton("💰 Balance", callback_data='balance'),
+                InlineKeyboardButton("🔄 Forward", callback_data='forward')
+            ],
+            [
+                InlineKeyboardButton("⬅️ Backup", callback_data='backup'),
+                InlineKeyboardButton("👤 Profile", callback_data='profile')
+            ],
             [InlineKeyboardButton("🎫 Purchase Token", callback_data='purchase')],
-            [InlineKeyboardButton("💳 My Account", callback_data='account')],
-            [InlineKeyboardButton("ℹ️ Help", callback_data='help')]
         ]
         
         if update.effective_user.id == ADMIN_USER_ID:
             keyboard.append([InlineKeyboardButton("👑 Admin Panel", callback_data='admin')])
         
         reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        welcome_text = (
+            f"*Welcome {user.first_name}!*\n\n"
+            f"🆔 Account ID: `{user.id}`\n"
+            "━━━━━━━━━━━━━━━\n"
+            "Select an option below:"
+        )
+        
         await update.message.reply_text(
-            "🤖 *Welcome to PR Bot!*\n\n"
-            "I can help you with PR signups and token management.\n"
-            "Please select an option:",
+            welcome_text,
             reply_markup=reply_markup,
             parse_mode='Markdown'
         )
@@ -152,60 +165,123 @@ class PRBotTelegram:
             parse_mode='Markdown'
         )
 
-    async def button_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle button presses"""
-        query = update.callback_query
-        await query.answer()
-
-        if query.data == 'purchase':
-            await self.show_purchase_options(update, context)
-        elif query.data.startswith('buy_'):
-            await self.process_purchase(update, context)
-        elif query.data == 'account':
-            await self.show_account(update, context)
-        elif query.data == 'help':
-            await self.show_help(update, context)
-        elif query.data == 'admin' and update.effective_user.id == ADMIN_USER_ID:
-            await self.show_admin_panel(query)
-
-    async def show_account(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Show user account info"""
-        user_id = str(update.effective_user.id)
-        # Get user's active tokens
-        active_tokens = [token for token, data in self.token_manager.tokens['active_tokens'].items() 
-                        if data['user_id'] == user_id and data['is_active']]
+    async def show_profile(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Show user profile"""
+        user = update.effective_user
+        user_id = str(user.id)
+        
+        # Get user's balance
+        balance = self.get_user_balance(user_id)
+        
+        profile_text = (
+            f"*👤 Profile Information*\n\n"
+            f"🆔 Account ID: `{user_id}`\n"
+            f"💰 Balance: ${balance:.2f}\n"
+            "━━━━━━━━━━━━━━━\n"
+        )
         
         keyboard = [
-            [InlineKeyboardButton("🔄 Top Up", callback_data='purchase')],
-            [InlineKeyboardButton("🔙 Back", callback_data='back')]
+            [
+                InlineKeyboardButton("💳 Add Funds", callback_data='add_funds'),
+                InlineKeyboardButton("📊 History", callback_data='history')
+            ],
+            [InlineKeyboardButton("🔙 Back", callback_data='back_to_main')]
         ]
+        
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await update.callback_query.edit_message_text(
+            profile_text,
+            reply_markup=reply_markup,
+            parse_mode='Markdown'
+        )
+
+    async def handle_payment(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle crypto payments"""
+        query = update.callback_query
+        payment_data = query.data.split('_')  # crypto_btc_daily
+        currency = payment_data[1]
+        plan = payment_data[2]
+        
+        # Generate payment address (you'll need to implement this)
+        payment_address = self.get_crypto_address(currency)
+        amount = self.prices[plan]['price']
+        
+        payment_text = (
+            f"*💰 Payment Details*\n\n"
+            f"Plan: {plan.capitalize()}\n"
+            f"Amount: ${amount}\n"
+            f"Currency: {currency.upper()}\n"
+            "━━━━━━━━━━━━━━━\n\n"
+            f"Send payment to:\n`{payment_address}`\n\n"
+            "Payment will be confirmed automatically.\n"
+            "_Please wait for 2 confirmations._"
+        )
+        
+        keyboard = [
+            [InlineKeyboardButton("✅ I've Paid", callback_data=f'verify_{currency}_{plan}')],
+            [InlineKeyboardButton("🔙 Back", callback_data='purchase')]
+        ]
+        
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(
+            payment_text,
+            reply_markup=reply_markup,
+            parse_mode='Markdown'
+        )
+
+    def get_user_balance(self, user_id: str) -> float:
+        """Get user's current balance"""
+        # Implement your balance tracking logic here
+        return 0.00  # Placeholder
+
+    def get_crypto_address(self, currency: str) -> str:
+        """Get crypto payment address"""
+        addresses = {
+            'btc': 'your_btc_address',
+            'eth': 'your_eth_address'
+        }
+        return addresses.get(currency, 'Invalid currency')
+
+    async def forward_backup(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle forward/backup operations"""
+        query = update.callback_query
+        action = query.data  # 'forward' or 'backup'
+        
+        if action == 'forward':
+            message = (
+                "*⏩ Forward Operation*\n\n"
+                "Your forward progress will be saved.\n"
+                "Continue with your session."
+            )
+        else:  # backup
+            message = (
+                "*⏪ Backup Operation*\n\n"
+                "Your previous session will be restored.\n"
+                "Please wait..."
+            )
+            
+        keyboard = [[InlineKeyboardButton("🔙 Back", callback_data='back_to_main')]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
-        message = "*Your Account*\n\n"
-        if active_tokens:
-            for token in active_tokens:
-                data = self.token_manager.tokens['active_tokens'][token]
-                message += f"Token: `{token}`\n"
-                message += f"Uses remaining: {data['uses_remaining']}\n\n"
-        else:
-            message += "No active tokens found.\n"
-            message += "Purchase a token to get started!"
-        
-        await update.callback_query.edit_message_text(
+        await query.edit_message_text(
             message,
             reply_markup=reply_markup,
             parse_mode='Markdown'
         )
 
-    async def show_admin_panel(self, query):
-        """Show admin panel"""
-        keyboard = [
-            [InlineKeyboardButton("Generate Token", callback_data='gen_token')],
-            [InlineKeyboardButton("View Stats", callback_data='stats')],
-            [InlineKeyboardButton("Back", callback_data='back')]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text("Admin Panel", reply_markup=reply_markup)
+    async def button_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle button presses"""
+        query = update.callback_query
+        await query.answer()
+
+        if query.data == 'profile':
+            await self.show_profile(update, context)
+        elif query.data in ['forward', 'backup']:
+            await self.forward_backup(update, context)
+        elif query.data.startswith('crypto_'):
+            await self.handle_payment(update, context)
+        elif query.data == 'back_to_main':
+            await self.start(update, context)
 
 def main():
     """Start the bot"""
