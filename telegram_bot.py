@@ -219,15 +219,23 @@ def main():
 
     # Start the bot
     print('Bot is starting...')
+    
+    # Get the webhook URL from environment variable
+    webhook_url = os.getenv('WEBHOOK_URL')
+    print(f'Webhook URL: {webhook_url}')
+
     if os.getenv('ENVIRONMENT') == 'production':
         # Use webhook in production
+        print('Starting webhook...')
         application.run_webhook(
             listen="0.0.0.0",
-            port=PORT,
-            webhook_url=os.getenv('WEBHOOK_URL')
+            port=int(os.getenv('PORT', 8080)),
+            webhook_url=webhook_url,
+            drop_pending_updates=True
         )
     else:
         # Use polling in development
+        print('Starting polling...')
         application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == '__main__':
