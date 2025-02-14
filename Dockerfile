@@ -26,7 +26,4 @@ ENV PORT=8080
 EXPOSE 8080
 
 # Command to run the bot
-CMD ["python", "telegram_bot.py"]
-
-# Add error handler
-RUN application.add_error_handler(bot.error_handler) 
+CMD ["python", "telegram_bot.py"] 
