@@ -38,4 +38,16 @@ data.json
 
 # OS
 .DS_Store
-Thumbs.db 
+Thumbs.db
+
+# Common Python ignores
+__pycache__/
+*.py[cod]
+*$py.class
+.env
+venv/
+.venv/
+
+# Don't ignore these
+!telegram_bot.py
+!requirements.txt 
