@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: typ4son-bot
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python telegram_bot.py
+    envVars:
+      - key: TELEGRAM_TOKEN
+        sync: false
+      - key: WEBHOOK_URL
+        sync: false
+      - key: ENVIRONMENT
+        value: production
+    autoDeploy: true 

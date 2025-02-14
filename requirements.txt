@@ -1,9 +1,9 @@
-python-telegram-bot[webhooks]==20.7
-selenium==4.15.2
+python-telegram-bot==20.7
 python-dotenv==1.0.0
+requests==2.31.0
+selenium==4.15.2
 webdriver-manager==4.0.1
 colorama==0.4.6
 pyfiglet==0.8.post1
 psutil>=5.8.0
-requests>=2.26.0
 web3==6.11.1
