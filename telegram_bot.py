@@ -1333,8 +1333,30 @@ class PRBotTelegram:
         except Exception as e:
             self.logger.error(f"Notification error for {user_id}: {str(e)}")
 
+    def error_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle errors"""
+        self.logger.error(f"Update {update} caused error {context.error}")
+        
+        try:
+            if update and update.effective_message:
+                update.effective_message.reply_text(
+                    f"{self.header}"
+                    "❌ *An error occurred*\n\n"
+                    "Please try again or contact support.",
+                    parse_mode='Markdown'
+                )
+        except Exception as e:
+            self.logger.error(f"Error in error handler: {str(e)}")
+
 def main():
     """Start the bot"""
+    # Initialize logging
+    logging.basicConfig(
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        level=logging.INFO
+    )
+    logger = logging.getLogger(__name__)
+
     # Initialize bot and application
     application = Application.builder().token(TELEGRAM_TOKEN).build()
     bot = PRBotTelegram()
@@ -1345,9 +1367,9 @@ def main():
     application.add_handler(CommandHandler("status", bot.show_token_status))
     application.add_handler(CallbackQueryHandler(bot.handle_callback))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, bot.handle_text))
-
-    # Start notification checker
-    bot.start_notification_checker(application)
+    
+    # Add error handler
+    application.add_error_handler(bot.error_handler)
 
     print('Bot is starting...')
     if os.getenv('ENVIRONMENT') == 'production':
